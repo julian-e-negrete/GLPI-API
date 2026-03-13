@@ -7,3 +7,4 @@ app/models/__pycache__/
 app/middleware/__pycache__/
 app/services/__pycache__/
 app/tests/__pycache__/
+app/routes/__pycache__/
