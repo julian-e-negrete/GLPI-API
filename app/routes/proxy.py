@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Request, Response, HTTPException, status, Header
 from starlette.responses import JSONResponse, PlainTextResponse
 
+from app.config import get_settings
 from app.services.glpi_client import glpi_client
 from app.services.oauth import oauth_manager
 from app.services.logger import proxy_logger
@@ -84,7 +85,7 @@ async def _proxify_request(
     proxy_logger.log_upstream_request(
         request_id=request_id,
         method=method,
-        url=f"http://192.168.1.33:80{endpoint}",
+        url=f"{get_settings().glpi_api_url}{endpoint}",
         headers={**dict(request.headers), **client_headers},
         body=json_data or form_data
     )

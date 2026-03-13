@@ -66,17 +66,15 @@ class TestConfiguration:
     def test_settings_loads_from_env(self, mock_settings):
         """TC-01: Verifica que la configuración se carga correctamente."""
         from app.config import Settings
-
         settings = Settings()
-        assert settings.glpi_api_url == "http://192.168.1.33:80"
+        assert settings.glpi_api_url is not None
         assert settings.proxy_port == 8080
 
     def test_token_url_constructed(self, mock_settings):
         """TC-01: Verifica construcción de URL de token."""
         from app.config import Settings
-
         settings = Settings()
-        assert settings.token_url == "http://192.168.1.33:80/api.php/v2.2/token"
+        assert settings.token_url == f"{settings.glpi_api_url}/api.php/v2.2/token"
 
     def test_glpi_headers_default(self, mock_settings):
         """TC-01: Verifica headers obligatorios."""
