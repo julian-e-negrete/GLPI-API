@@ -1,72 +1,47 @@
-"""
-Rutas para autenticación OAuth.
-Maneja la obtención de tokens de acceso.
-"""
-from fastapi import APIRouter, HTTPException, Form, status
+from fastapi import APIRouter, HTTPException, Form, Request, status
 from typing import Optional
 
 from app.services.oauth import oauth_manager
-from app.models.token import TokenResponse
+from app.models.token import TokenResponse, TokenRequest
 
 
 router = APIRouter(prefix="/api/v2.2", tags=["Authentication"])
 
 
+async def _parse_token_request(request: Request) -> TokenRequest:
+    """Acepta tanto JSON como form-urlencoded."""
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        data = await request.json()
+    else:
+        form = await request.form()
+        data = dict(form)
+    return TokenRequest(**data)
+
+
 @router.post("/token", response_model=TokenResponse)
-async def get_token(
-    grant_type: str = Form(default="password", description="Tipo de grant OAuth"),
-    client_id: str = Form(..., description="ID de cliente OAuth"),
-    client_secret: str = Form(..., description="Secreto del cliente"),
-    username: str = Form(..., description="Usuario GLPI"),
-    password: str = Form(..., description="Password del usuario")
-):
-    """
-    Obtiene un token de acceso usando el grant de password.
+async def get_token(request: Request):
+    try:
+        body = await _parse_token_request(request)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail="Parámetros requeridos: grant_type, client_id, client_secret, username, password")
 
-    Este endpoint permite obtener un token de acceso OAuth para autenticar
-    las peticionessubsecuentes a la API de GLPI.
+    if body.grant_type != "password":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="grant_type debe ser 'password'")
 
-    ## Parámetros (form-urlencoded)
-
-    - **grant_type**: Debe ser "password"
-    - **client_id**: ID de cliente OAuth (proporcionado por GLPI)
-    - **client_secret**: Secreto del cliente OAuth
-    - **username**: Usuario de GLPI
-    - **password**: Password del usuario de GLPI
-    """
-    # Validar grant_type
-    if grant_type != "password":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="grant_type debe ser 'password'"
-        )
-
-    # Validar credenciales de cliente
     from app.config import get_settings
     settings = get_settings()
 
-    if client_id != settings.glpi_client_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="client_id inválido"
-        )
+    if body.client_id != settings.glpi_client_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="client_id inválido")
 
-    if client_secret != settings.glpi_client_secret:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="client_secret inválido"
-        )
+    if body.client_secret != settings.glpi_client_secret:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="client_secret inválido")
 
     try:
-        # Obtener token
-        token_response = await oauth_manager.get_token(
-            username=username,
-            password=password
-        )
-        return token_response
-
+        return await oauth_manager.get_token(username=body.username, password=body.password)
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Error de autenticación: {str(e)}"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail=f"Error de autenticación: {str(e)}")
