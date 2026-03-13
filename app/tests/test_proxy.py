@@ -325,7 +325,7 @@ class TestLogging:
                     # Authorization debe estar enmascarado
                     assert masked["Authorization"] == "Bearer eyJ***"
                     assert masked["password"] == "***"
-                    assert masked["client_secret"] == "very_long_s***"
+                    assert masked["client_secret"] == "***"
 
 
 # ============================================================================
@@ -496,10 +496,14 @@ class TestMiddleware:
         mock_request.client = Mock()
         mock_request.client.host = "192.168.1.100"
 
+        async def async_body_iterator():
+            yield b'{"result": "ok"}'
+
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.headers = {}
-        mock_response.body = b'{"result": "ok"}'
+        mock_response.media_type = "application/json"
+        mock_response.body_iterator = async_body_iterator()
 
         async def mock_call_next(req):
             return mock_response
