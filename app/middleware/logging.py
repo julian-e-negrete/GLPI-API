@@ -53,9 +53,11 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         )
 
         # Reconstruir la respuesta con el body ya consumido
-        return StarletteResponse(
+        rebuilt = StarletteResponse(
             content=response_body,
             status_code=response.status_code,
             headers=dict(response.headers),
             media_type=response.media_type
         )
+        rebuilt.headers["X-Request-ID"] = request_id
+        return rebuilt
