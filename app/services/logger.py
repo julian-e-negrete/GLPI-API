@@ -110,23 +110,10 @@ class ProxyLogger:
         headers: Dict[str, str],
         body: Any = None,
         direction: str = "client_to_proxy",
-        source_ip: Optional[str] = None
+        source_ip: Optional[str] = None,
+        request_id: Optional[str] = None
     ) -> str:
-        """
-        Registra una petición de entrada (input).
-
-        Args:
-            method: Método HTTP
-            path: Path del endpoint
-            headers: Headers de la petición
-            body: Body de la petición
-            direction: Dirección del flujo
-            source_ip: IP origen
-
-        Returns:
-            ID de la petición
-        """
-        request_id = str(uuid.uuid4())
+        request_id = request_id or str(uuid.uuid4())
 
         log_entry = {
             "timestamp": datetime.utcnow().isoformat() + "Z",

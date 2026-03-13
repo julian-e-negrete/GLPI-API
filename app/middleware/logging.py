@@ -8,76 +8,54 @@ from typing import Callable
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response as StarletteResponse
 
 from app.services.logger import proxy_logger
 
 
 class LoggingMiddleware(BaseHTTPMiddleware):
-    """Middleware para logging de requests y responses."""
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        """
-        Procesa la petición y registra información de entrada y salida.
-
-        Args:
-            request: Petición de FastAPI
-            call_next: Siguiente middleware/handler
-
-        Returns:
-            Response
-        """
-        # Generar ID único para esta petición
         request_id = str(uuid.uuid4())
 
-        # Obtener información de la petición
-        method = request.method
-        path = request.url.path
-        source_ip = request.client.host if request.client else None
-        headers = dict(request.headers)
-
-        # Capturar body de la petición si existe
+        # Capturar body del request
         body = None
-        if method in ("POST", "PUT", "PATCH"):
-            # Leer el body para logging (reutilizable después)
+        if request.method in ("POST", "PUT", "PATCH"):
             body = await request.body()
-            # Recrear el request con el body
             request._body = body
 
-        # Registrar petición de entrada (input)
         proxy_logger.log_request(
-            method=method,
-            path=path,
-            headers=headers,
+            method=request.method,
+            path=request.url.path,
+            headers=dict(request.headers),
             body=body.decode("utf-8") if body else None,
             direction="client_to_proxy",
-            source_ip=source_ip
+            source_ip=request.client.host if request.client else None,
+            request_id=request_id
         )
 
-        # Medir tiempo de respuesta
         start_time = time.time()
-
-        # Procesar la petición
         response = await call_next(request)
-
-        # Calcular tiempo de respuesta
         response_time_ms = int((time.time() - start_time) * 1000)
 
-        # Obtener body de la respuesta
-        response_body = None
-        if hasattr(response, "body"):
-            response_body = response.body
+        # Consumir el stream para capturar el body de la respuesta
+        response_body = b""
+        async for chunk in response.body_iterator:
+            response_body += chunk if isinstance(chunk, bytes) else chunk.encode()
 
-        # Registrar respuesta de salida (output)
         proxy_logger.log_response(
             request_id=request_id,
             status_code=response.status_code,
             headers=dict(response.headers),
-            body=response_body.decode("utf-8") if response_body else None,
+            body=response_body.decode("utf-8", errors="replace") if response_body else None,
             response_time_ms=response_time_ms,
             direction="proxy_to_client"
         )
 
-        # Agregar request_id a los headers de respuesta
-        response.headers["X-Request-ID"] = request_id
-
-        return response
+        # Reconstruir la respuesta con el body ya consumido
+        return StarletteResponse(
+            content=response_body,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type=response.media_type
+        )
