@@ -83,14 +83,16 @@ class ProxyLogger:
             Headers con datos sensibles enmascarados
         """
         sensitive_keys = {
-            'authorization', 'password', 'client_secret', 'x-api-key',
-            'access_token', 'refresh_token'
+            'authorization', 'x-api-key', 'access_token', 'refresh_token'
         }
+        always_mask = {'password', 'client_secret'}
 
         masked = {}
         for key, value in headers.items():
             key_lower = key.lower()
-            if key_lower in sensitive_keys:
+            if key_lower in always_mask:
+                masked[key] = "***"
+            elif key_lower in sensitive_keys:
                 if value and len(value) > 10:
                     # Mantener primeros 10 caracteres
                     masked[key] = value[:10] + "***"

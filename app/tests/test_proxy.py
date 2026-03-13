@@ -124,10 +124,12 @@ class TestOAuth:
 
     @pytest.mark.asyncio
     async def test_get_token_invalid_grant_type(self, mock_settings):
-        """TC-05: Obtener token con grant_type inválido."""
+        """TC-05: Obtener token con credenciales vacías lanza ValueError."""
         from app.services.oauth import OAuthManager
 
         manager = OAuthManager()
+        manager.settings.glpi_username = ""
+        manager.settings.glpi_password = ""
 
         with pytest.raises(ValueError, match="Credenciales de usuario requeridas"):
             await manager.get_token(username="", password="")
@@ -387,6 +389,7 @@ class TestGLPIClient:
         from app.services.glpi_client import GLPIClient
 
         client = GLPIClient()
+        client.oauth = mock_oauth_manager
         mock_oauth_manager.get_bearer_token_header.return_value = {
             "Authorization": "Bearer test_token"
         }
@@ -485,7 +488,6 @@ class TestMiddleware:
         app = FastAPI()
         middleware = LoggingMiddleware(app)
 
-        # Crear mock de request
         mock_request = Mock()
         mock_request.method = "POST"
         mock_request.url.path = "/api/v2.2/test"
@@ -494,7 +496,6 @@ class TestMiddleware:
         mock_request.client = Mock()
         mock_request.client.host = "192.168.1.100"
 
-        # Mock de call_next
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.headers = {}
@@ -503,10 +504,11 @@ class TestMiddleware:
         async def mock_call_next(req):
             return mock_response
 
-        # Ejecutar middleware
-        response = await middleware.dispatch(mock_request, mock_call_next)
+        with patch('app.middleware.logging.proxy_logger') as mock_logger:
+            mock_logger.log_request = Mock()
+            mock_logger.log_response = Mock()
+            response = await middleware.dispatch(mock_request, mock_call_next)
 
-        # Verificar que response tiene request_id
         assert "X-Request-ID" in response.headers
 
 
