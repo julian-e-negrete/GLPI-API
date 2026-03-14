@@ -9,3 +9,10 @@ app/services/__pycache__/
 app/tests/__pycache__/
 app/routes/__pycache__/
 <MagicMock name='mock.__truediv__()' id='139800811177440'>
+
+# Local test/docs files (belong in docs/* branches)
+LESSONS_LEARNED.md
+seed_mock_data.py
+seed_results.json
+glpi-api-conversation
+glpi-api-test
