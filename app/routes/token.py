@@ -41,7 +41,11 @@ async def get_token(request: Request):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="client_secret inválido")
 
     try:
-        return await oauth_manager.get_token(username=body.username, password=body.password)
+        return await oauth_manager.get_token(
+            username=body.username,
+            password=body.password,
+            scope=body.scope or "api user"
+        )
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
                             detail=f"Error de autenticación: {str(e)}")

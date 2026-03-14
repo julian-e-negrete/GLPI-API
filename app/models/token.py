@@ -13,6 +13,7 @@ class TokenRequest(BaseModel):
     client_secret: str = Field(..., description="Secreto del cliente")
     username: str = Field(..., description="Usuario GLPI")
     password: str = Field(..., description="Password del usuario")
+    scope: Optional[str] = Field(default="api user", description="Scopes OAuth separados por espacio")
 
 
 class TokenResponse(BaseModel):
