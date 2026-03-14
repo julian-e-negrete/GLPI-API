@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "glpi-api-proxy": {
+      "command": "/home/haraidasan/programming/python/.venv/bin/python3",
+      "args": ["/home/haraidasan/programming/GLPI-API/mcp_server.py"],
+      "description": "GLPI API Proxy MCP server — docs, endpoint catalog, live proxy tools"
+    }
+  }
+}
