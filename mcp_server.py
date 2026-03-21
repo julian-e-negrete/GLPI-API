@@ -159,6 +159,64 @@ TOOLS = [
         description="List all available GLPI v2.2 endpoint categories.",
         inputSchema={"type": "object", "properties": {}},
     ),
+    Tool(
+        name="create_server_ticket",
+        description=(
+            "Create a GLPI ticket linked to a server (Computer asset). "
+            "Use this when starting a task on a server to register it in GLPI. "
+            "server_name must be one of: SRV-SCRAPING-PROXY, SRV-GLPI-PROCESSOR"
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "server_name": {"type": "string", "description": "Server name, e.g. SRV-SCRAPING-PROXY"},
+                "title": {"type": "string", "description": "Short task title"},
+                "description": {"type": "string", "description": "Full task description"},
+                "agent": {"type": "string", "description": "Agent name creating the ticket", "default": "kiro"},
+                "urgency": {"type": "integer", "description": "1=very high, 2=high, 3=medium, 4=low, 5=very low", "default": 3},
+            },
+            "required": ["server_name", "title", "description"],
+        },
+    ),
+    Tool(
+        name="list_server_tickets",
+        description="List all active GLPI tickets linked to a server.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "server_name": {"type": "string", "description": "Server name, e.g. SRV-GLPI-PROCESSOR"},
+            },
+            "required": ["server_name"],
+        },
+    ),
+    Tool(
+        name="complete_server_ticket",
+        description=(
+            "Mark a GLPI ticket as resolved. "
+            "Use this when a task on a server is finished."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "server_name": {"type": "string", "description": "Server name the ticket belongs to"},
+                "ticket_id": {"type": "integer", "description": "GLPI ticket ID to resolve"},
+                "solution": {"type": "string", "description": "Description of what was done", "default": "Tarea completada por agente."},
+            },
+            "required": ["server_name", "ticket_id"],
+        },
+    ),
+    Tool(
+        name="glpi_patch",
+        description="Update a resource in GLPI via PATCH through the proxy.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Full resource path with ID, e.g. /Assistance/Ticket/42"},
+                "body": {"type": "object", "description": "JSON body with fields to update"},
+            },
+            "required": ["path", "body"],
+        },
+    ),
 ]
 
 
@@ -248,6 +306,68 @@ async def call_tool(name: str, arguments: dict) -> CallToolResult:
             "Status:         /status, /status/all",
         ]
         return ok("\n".join(categories))
+
+    if name == "glpi_patch":
+        path = arguments.get("path", "")
+        body = arguments.get("body", {})
+        try:
+            token = _get_token()
+            r = httpx.patch(
+                f"{PROXY_URL}/api/v2.2{path}",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json=body,
+                timeout=15,
+            )
+            return ok(r.json())
+        except Exception as e:
+            return err(str(e))
+
+    if name == "create_server_ticket":
+        server_name = arguments.get("server_name", "")
+        try:
+            token = _get_token()
+            r = httpx.post(
+                f"{PROXY_URL}/api/v2.2/infra/servers/{server_name}/tickets",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json={
+                    "title": arguments["title"],
+                    "description": arguments["description"],
+                    "agent": arguments.get("agent", "kiro"),
+                    "urgency": arguments.get("urgency", 3),
+                },
+                timeout=15,
+            )
+            return ok(r.json())
+        except Exception as e:
+            return err(str(e))
+
+    if name == "list_server_tickets":
+        server_name = arguments.get("server_name", "")
+        try:
+            token = _get_token()
+            r = httpx.get(
+                f"{PROXY_URL}/api/v2.2/infra/servers/{server_name}/tickets",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=15,
+            )
+            return ok(r.json())
+        except Exception as e:
+            return err(str(e))
+
+    if name == "complete_server_ticket":
+        server_name = arguments.get("server_name", "")
+        ticket_id = arguments.get("ticket_id")
+        try:
+            token = _get_token()
+            r = httpx.patch(
+                f"{PROXY_URL}/api/v2.2/infra/servers/{server_name}/tickets/{ticket_id}/complete",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json={"solution": arguments.get("solution", "Tarea completada por agente.")},
+                timeout=15,
+            )
+            return ok(r.json())
+        except Exception as e:
+            return err(str(e))
 
     return err(f"Unknown tool: {name}")
 
