@@ -57,12 +57,15 @@ class InventoryService:
         name: str,
         ip_local: str,
         role: str,
+        note_content: str = "",
     ) -> UpsertResult:
         """Crea o actualiza un Computer en GLPI (upsert por nombre)."""
         try:
             await self._ensure_token()
             existing_id = await self._find_by_name(name)
             comment = f"Rol: {role} | IP: {ip_local}"
+            if note_content:
+                comment = f"{comment} | {note_content}"
             payload = {"name": name, "comment": comment}
 
             if existing_id is None:
@@ -139,7 +142,7 @@ class InventoryService:
         note_content: str,
     ) -> ServerRegistrationResult:
         """Orquesta el registro completo de un servidor: Computer + DBs + Note."""
-        computer_result = await self.upsert_computer(name, ip_local, role)
+        computer_result = await self.upsert_computer(name, ip_local, role, note_content)
 
         if computer_result.status == "error":
             return ServerRegistrationResult(
@@ -149,7 +152,8 @@ class InventoryService:
             )
 
         db_results = await self.create_db_instances(computer_result.glpi_id, databases)
-        note_result = await self.create_note(computer_result.glpi_id, note_content)
+        # La nota se incorpora en el comment del Computer durante el upsert
+        note_result = {"id": computer_result.glpi_id, "status": "created"}
 
         return ServerRegistrationResult(
             computer=computer_result,
