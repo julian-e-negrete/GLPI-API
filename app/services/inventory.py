@@ -67,7 +67,7 @@ class InventoryService:
 
             if existing_id is None:
                 response = await self.client.post(COMPUTER_ENDPOINT, json_data=payload)
-                if response.status_code == 201:
+                if response.status_code in (200, 201):
                     return UpsertResult(status="created", glpi_id=response.json()["id"])
                 return UpsertResult(
                     status="error",
@@ -77,7 +77,7 @@ class InventoryService:
                 response = await self.client.patch(
                     f"{COMPUTER_ENDPOINT}/{existing_id}", json_data=payload
                 )
-                if response.status_code == 200:
+                if response.status_code in (200, 201):
                     return UpsertResult(status="updated", glpi_id=existing_id)
                 return UpsertResult(
                     status="error",
@@ -106,7 +106,7 @@ class InventoryService:
                     "comment": db.get("comment", ""),
                 }
                 response = await self.client.post(DB_INSTANCE_ENDPOINT, json_data=payload)
-                if response.status_code == 201:
+                if response.status_code in (200, 201):
                     results.append({"name": db["name"], "id": response.json()["id"], "status": "created"})
                 else:
                     results.append({"name": db["name"], "id": None, "status": "error"})
@@ -122,7 +122,7 @@ class InventoryService:
                 f"{COMPUTER_ENDPOINT}/{computer_id}/Note",
                 json_data={"content": content},
             )
-            if response.status_code == 201:
+            if response.status_code in (200, 201):
                 return {"id": response.json()["id"], "status": "created"}
             return {"id": None, "status": "error"}
         except Exception as e:
