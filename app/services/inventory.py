@@ -1,70 +1,49 @@
 """
 Servicio de inventario de infraestructura para GLPI.
-Gestiona la creación y actualización de assets de tipo Computer.
+Gestiona la creación y actualización de assets de tipo Computer,
+DatabaseInstance y Note.
 """
 from __future__ import annotations
 
 import logging
 from typing import Optional
 
-from app.models.infra import UpsertResult
+from app.models.infra import ServerRegistrationResult, UpsertResult
 from app.services.glpi_client import GLPIClient
 from app.services.oauth import oauth_manager
 
 logger = logging.getLogger(__name__)
 
 COMPUTER_ENDPOINT = "/api.php/v2.2/Assets/Computer"
+DB_INSTANCE_ENDPOINT = "/api.php/v2.2/Management/DatabaseInstance"
 
 
 class InventoryService:
-    """Servicio para gestionar el inventario de Computers en GLPI."""
+    """Servicio para gestionar el inventario de infraestructura en GLPI."""
 
     def __init__(self, client: GLPIClient):
         self.client = client
 
-    # ------------------------------------------------------------------
-    # Sub-tarea 2.1
-    # ------------------------------------------------------------------
-    def _build_comment(
-        self,
-        ip_local: str,
-        ip_tailscale: str,
-        role: str,
-        services: list[str],
-        detail: Optional[str] = None,
-    ) -> str:
-        """Construye el campo comment con el formato estándar."""
-        svc_str = ", ".join(services) if services else "—"
-        comment = (
-            f"Rol: {role} | "
-            f"IP: {ip_local} | "
-            f"Tailscale: {ip_tailscale} | "
-            f"Servicios: {svc_str}"
-        )
-        if detail:
-            comment += f"\n---\n{detail}"
-        return comment
-
-    # ------------------------------------------------------------------
-    # Sub-tarea 2.3
-    # ------------------------------------------------------------------
     async def _ensure_token(self) -> None:
         """Asegura que el oauth_manager tiene un token válido cacheado."""
         await oauth_manager.ensure_valid_token()
 
     async def _find_by_name(self, name: str) -> Optional[int]:
-        """Busca un Computer por nombre exacto y retorna su id, o None si no existe."""
+        """Busca un Computer por nombre exacto y retorna su id, o None si no existe.
+        
+        Nota: el parámetro searchText de GLPI no filtra correctamente, por lo que
+        se obtiene la lista completa y se filtra en Python por nombre exacto.
+        """
         try:
             response = await self.client.get(
                 COMPUTER_ENDPOINT,
-                params={"searchText[name]": name, "range": "0-100"},
+                params={"range": "0-500"},
             )
             if response.status_code != 200:
                 return None
             items = response.json()
             if not items:
                 return None
-            # Filtrar por nombre exacto (GLPI hace búsqueda parcial)
             for item in items:
                 if item.get("name") == name and not item.get("is_deleted", False):
                     return item["id"]
@@ -73,27 +52,20 @@ class InventoryService:
             logger.error(f"Error buscando Computer por nombre '{name}': {e}")
             return None
 
-    # ------------------------------------------------------------------
-    # Sub-tarea 2.4
-    # ------------------------------------------------------------------
     async def upsert_computer(
         self,
         name: str,
         ip_local: str,
-        ip_tailscale: str,
         role: str,
-        services: list[str],
-        detail: Optional[str] = None,
     ) -> UpsertResult:
         """Crea o actualiza un Computer en GLPI (upsert por nombre)."""
         try:
             await self._ensure_token()
             existing_id = await self._find_by_name(name)
-            comment = self._build_comment(ip_local, ip_tailscale, role, services, detail)
+            comment = f"Rol: {role} | IP: {ip_local}"
             payload = {"name": name, "comment": comment}
 
             if existing_id is None:
-                # Crear nuevo asset
                 response = await self.client.post(COMPUTER_ENDPOINT, json_data=payload)
                 if response.status_code == 201:
                     return UpsertResult(status="created", glpi_id=response.json()["id"])
@@ -102,7 +74,6 @@ class InventoryService:
                     error=f"{response.status_code}: {response.text}",
                 )
             else:
-                # Actualizar asset existente
                 response = await self.client.patch(
                     f"{COMPUTER_ENDPOINT}/{existing_id}", json_data=payload
                 )
@@ -116,9 +87,76 @@ class InventoryService:
             logger.error(f"Error en upsert_computer para '{name}': {e}")
             return UpsertResult(status="error", error=str(e))
 
-    # ------------------------------------------------------------------
-    # Sub-tarea 2.8
-    # ------------------------------------------------------------------
+    async def create_db_instances(
+        self,
+        computer_id: int,
+        databases: list[dict],
+    ) -> list[dict]:
+        """Crea DatabaseInstance en GLPI vinculadas al Computer dado."""
+        results = []
+        for db in databases:
+            try:
+                payload = {
+                    "name": db["name"],
+                    "port": db.get("port"),
+                    "version": db.get("version"),
+                    "is_active": True,
+                    "itemtype": "Computer",
+                    "items_id": computer_id,
+                    "comment": db.get("comment", ""),
+                }
+                response = await self.client.post(DB_INSTANCE_ENDPOINT, json_data=payload)
+                if response.status_code == 201:
+                    results.append({"name": db["name"], "id": response.json()["id"], "status": "created"})
+                else:
+                    results.append({"name": db["name"], "id": None, "status": "error"})
+            except Exception as e:
+                logger.error(f"Error creando DatabaseInstance '{db.get('name')}': {e}")
+                results.append({"name": db.get("name"), "id": None, "status": "error"})
+        return results
+
+    async def create_note(self, computer_id: int, content: str) -> dict:
+        """Crea una Note asociada al Computer dado."""
+        try:
+            response = await self.client.post(
+                f"{COMPUTER_ENDPOINT}/{computer_id}/Note",
+                json_data={"content": content},
+            )
+            if response.status_code == 201:
+                return {"id": response.json()["id"], "status": "created"}
+            return {"id": None, "status": "error"}
+        except Exception as e:
+            logger.error(f"Error creando Note para computer_id={computer_id}: {e}")
+            return {"id": None, "status": "error"}
+
+    async def register_server(
+        self,
+        name: str,
+        ip_local: str,
+        ip_tailscale: str,
+        role: str,
+        databases: list[dict],
+        note_content: str,
+    ) -> ServerRegistrationResult:
+        """Orquesta el registro completo de un servidor: Computer + DBs + Note."""
+        computer_result = await self.upsert_computer(name, ip_local, role)
+
+        if computer_result.status == "error":
+            return ServerRegistrationResult(
+                computer=computer_result,
+                db_instances=[],
+                note={"id": None, "status": "error"},
+            )
+
+        db_results = await self.create_db_instances(computer_result.glpi_id, databases)
+        note_result = await self.create_note(computer_result.glpi_id, note_content)
+
+        return ServerRegistrationResult(
+            computer=computer_result,
+            db_instances=db_results,
+            note=note_result,
+        )
+
     async def list_computers(self) -> list[dict]:
         """Retorna la lista de todos los Computers registrados en GLPI."""
         try:
