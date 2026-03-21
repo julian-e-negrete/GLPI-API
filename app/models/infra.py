@@ -65,3 +65,28 @@ class ServerRegistrationResult:
     computer: UpsertResult
     db_instances: list[dict] = field(default_factory=list)
     note: dict = field(default_factory=dict)
+
+
+# --- Modelos de Tickets ---
+
+class TicketCreateRequest(BaseModel):
+    """Request para crear un ticket vinculado a un servidor."""
+    title: str
+    description: str
+    agent: str = "kiro"  # nombre del agente que crea el ticket
+    urgency: Literal[1, 2, 3, 4, 5] = 3  # 1=muy alta, 5=muy baja
+
+class TicketResponse(BaseModel):
+    """Respuesta de un ticket de GLPI."""
+    id: int
+    title: str
+    description: str
+    status_id: int
+    status_name: str
+    computer_id: Optional[int] = None
+    computer_name: Optional[str] = None
+    agent: Optional[str] = None
+
+class TicketCompleteRequest(BaseModel):
+    """Request para completar un ticket con una solución."""
+    solution: str = "Tarea completada por agente."

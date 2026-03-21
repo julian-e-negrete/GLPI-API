@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from app.models.infra import ServerRegistrationResult, UpsertResult
+from app.models.infra import ServerRegistrationResult, TicketResponse, UpsertResult
 from app.services.glpi_client import GLPIClient
 from app.services.oauth import oauth_manager
 
@@ -171,3 +171,93 @@ class InventoryService:
         except Exception as e:
             logger.error(f"Error listando Computers: {e}")
             return []
+
+
+TICKET_ENDPOINT = "/api.php/v2.2/Assistance/Ticket"
+
+# Mapeo de status GLPI
+TICKET_STATUS = {1: "Nuevo", 2: "En curso (asignado)", 3: "En curso (planificado)", 4: "Pendiente", 5: "Resuelto", 6: "Cerrado"}
+
+
+class TicketService:
+    """Servicio para gestionar tickets de GLPI vinculados a servidores."""
+
+    def __init__(self, client: GLPIClient, inventory: InventoryService):
+        self.client = client
+        self.inventory = inventory
+
+    async def _resolve_computer(self, server_name: str) -> Optional[int]:
+        """Retorna el computer_id de un servidor por nombre, o None si no existe."""
+        return await self.inventory._find_by_name(server_name)
+
+    def _parse_ticket(self, t: dict, computer_id: Optional[int] = None, computer_name: Optional[str] = None) -> TicketResponse:
+        status = t.get("status", {})
+        status_id = status.get("id", 0) if isinstance(status, dict) else status
+        status_name = status.get("name", "") if isinstance(status, dict) else TICKET_STATUS.get(status_id, "")
+        # Extraer agente del campo content si fue embebido
+        content = t.get("content", "")
+        agent = None
+        if content.startswith("[agent:") and "]" in content:
+            agent = content[7:content.index("]")]
+            content = content[content.index("]") + 1:].strip()
+        return TicketResponse(
+            id=t["id"],
+            title=t["name"],
+            description=content,
+            status_id=status_id,
+            status_name=status_name,
+            computer_id=computer_id,
+            computer_name=computer_name,
+            agent=agent,
+        )
+
+    async def create_ticket(self, server_name: str, title: str, description: str, agent: str, urgency: int) -> dict:
+        """Crea un ticket en GLPI vinculado al Computer del servidor dado."""
+        await self.inventory._ensure_token()
+        computer_id = await self._resolve_computer(server_name)
+        if computer_id is None:
+            return {"error": f"Servidor '{server_name}' no encontrado en GLPI"}
+
+        # Embebemos el agente en el content para trazabilidad
+        content = f"[agent:{agent}] {description}"
+        payload = {
+            "name": title,
+            "content": content,
+            "urgency": urgency,
+            "type": 2,  # demanda (no incidente)
+            "items_id": computer_id,
+            "itemtype": "Computer",
+        }
+        response = await self.client.post(TICKET_ENDPOINT, json_data=payload)
+        if response.status_code not in (200, 201):
+            return {"error": f"{response.status_code}: {response.text}"}
+        ticket_id = response.json()["id"]
+        return {"id": ticket_id, "status": "created", "computer_id": computer_id}
+
+    async def list_tickets(self, server_name: str) -> list[TicketResponse]:
+        """Lista todos los tickets activos vinculados a un servidor."""
+        await self.inventory._ensure_token()
+        computer_id = await self._resolve_computer(server_name)
+        if computer_id is None:
+            return []
+
+        response = await self.client.get(TICKET_ENDPOINT, params={"range": "0-500"})
+        if response.status_code != 200:
+            return []
+
+        tickets = response.json()
+        result = []
+        for t in tickets:
+            if t.get("is_deleted"):
+                continue
+            result.append(self._parse_ticket(t, computer_id, server_name))
+        return result
+
+    async def complete_ticket(self, ticket_id: int, solution: str) -> dict:
+        """Marca un ticket como resuelto (status=5) con una solución."""
+        await self.inventory._ensure_token()
+        payload = {"status": 5, "solution": solution}
+        response = await self.client.patch(f"{TICKET_ENDPOINT}/{ticket_id}", json_data=payload)
+        if response.status_code not in (200, 201):
+            return {"error": f"{response.status_code}: {response.text}"}
+        return {"id": ticket_id, "status": "resolved"}

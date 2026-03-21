@@ -106,3 +106,40 @@ async def seed_servers():
             )
 
     return SeedResponse(results=results)
+
+
+# --- Endpoints de Tickets por Servidor ---
+
+from app.models.infra import TicketCompleteRequest, TicketCreateRequest
+from app.services.inventory import TicketService
+
+
+def _get_ticket_service() -> TicketService:
+    return TicketService(glpi_client, InventoryService(glpi_client))
+
+
+@router.post("/servers/{server_name}/tickets")
+async def create_server_ticket(server_name: str, body: TicketCreateRequest):
+    """Crea un ticket en GLPI vinculado al servidor indicado."""
+    svc = _get_ticket_service()
+    return await svc.create_ticket(
+        server_name=server_name,
+        title=body.title,
+        description=body.description,
+        agent=body.agent,
+        urgency=body.urgency,
+    )
+
+
+@router.get("/servers/{server_name}/tickets", response_model=list[TicketResponse])
+async def list_server_tickets(server_name: str):
+    """Lista todos los tickets activos del servidor indicado."""
+    svc = _get_ticket_service()
+    return await svc.list_tickets(server_name)
+
+
+@router.patch("/servers/{server_name}/tickets/{ticket_id}/complete")
+async def complete_server_ticket(server_name: str, ticket_id: int, body: TicketCompleteRequest):
+    """Marca un ticket como resuelto."""
+    svc = _get_ticket_service()
+    return await svc.complete_ticket(ticket_id, body.solution)
