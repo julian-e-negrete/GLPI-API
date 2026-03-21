@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.middleware.logging import LoggingMiddleware
-from app.routes import token, health, proxy
+from app.routes import token, health, proxy, infra
 
 
 # Configurar logging básico
@@ -48,6 +48,7 @@ app.add_middleware(LoggingMiddleware)
 # Registrar rutas
 app.include_router(token.router)
 app.include_router(health.router)
+app.include_router(infra.router)   # antes que proxy para que /infra/* no sea capturado por el catch-all
 app.include_router(proxy.router)
 
 
