@@ -49,18 +49,22 @@ class InventoryService:
         await oauth_manager.ensure_valid_token()
 
     async def _find_by_name(self, name: str) -> Optional[int]:
-        """Busca un Computer por nombre y retorna su id, o None si no existe."""
+        """Busca un Computer por nombre exacto y retorna su id, o None si no existe."""
         try:
             response = await self.client.get(
                 COMPUTER_ENDPOINT,
-                params={"searchText[name]": name, "range": "0-1"},
+                params={"searchText[name]": name, "range": "0-100"},
             )
             if response.status_code != 200:
                 return None
             items = response.json()
             if not items:
                 return None
-            return items[0]["id"]
+            # Filtrar por nombre exacto (GLPI hace búsqueda parcial)
+            for item in items:
+                if item.get("name") == name and not item.get("is_deleted", False):
+                    return item["id"]
+            return None
         except Exception as e:
             logger.error(f"Error buscando Computer por nombre '{name}': {e}")
             return None
