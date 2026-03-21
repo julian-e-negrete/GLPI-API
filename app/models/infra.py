@@ -16,6 +16,7 @@ class ComputerUpsertRequest(BaseModel):
     ip_tailscale: str
     role: str
     services: list[str] = []
+    detail: Optional[str] = None
 
 
 class ComputerUpsertResponse(BaseModel):

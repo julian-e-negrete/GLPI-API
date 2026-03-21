@@ -31,15 +31,19 @@ class InventoryService:
         ip_tailscale: str,
         role: str,
         services: list[str],
+        detail: Optional[str] = None,
     ) -> str:
         """Construye el campo comment con el formato estándar."""
         svc_str = ", ".join(services) if services else "—"
-        return (
-            f"Servicios: {svc_str} | "
+        comment = (
+            f"Rol: {role} | "
             f"IP: {ip_local} | "
             f"Tailscale: {ip_tailscale} | "
-            f"Rol: {role}"
+            f"Servicios: {svc_str}"
         )
+        if detail:
+            comment += f"\n---\n{detail}"
+        return comment
 
     # ------------------------------------------------------------------
     # Sub-tarea 2.3
@@ -79,12 +83,13 @@ class InventoryService:
         ip_tailscale: str,
         role: str,
         services: list[str],
+        detail: Optional[str] = None,
     ) -> UpsertResult:
         """Crea o actualiza un Computer en GLPI (upsert por nombre)."""
         try:
             await self._ensure_token()
             existing_id = await self._find_by_name(name)
-            comment = self._build_comment(ip_local, ip_tailscale, role, services)
+            comment = self._build_comment(ip_local, ip_tailscale, role, services, detail)
             payload = {"name": name, "comment": comment}
 
             if existing_id is None:
