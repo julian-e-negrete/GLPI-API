@@ -9,6 +9,7 @@ from typing import Optional
 
 from app.models.infra import UpsertResult
 from app.services.glpi_client import GLPIClient
+from app.services.oauth import oauth_manager
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,10 @@ class InventoryService:
     # ------------------------------------------------------------------
     # Sub-tarea 2.3
     # ------------------------------------------------------------------
+    async def _ensure_token(self) -> None:
+        """Asegura que el oauth_manager tiene un token válido cacheado."""
+        await oauth_manager.ensure_valid_token()
+
     async def _find_by_name(self, name: str) -> Optional[int]:
         """Busca un Computer por nombre y retorna su id, o None si no existe."""
         try:
@@ -73,6 +78,7 @@ class InventoryService:
     ) -> UpsertResult:
         """Crea o actualiza un Computer en GLPI (upsert por nombre)."""
         try:
+            await self._ensure_token()
             existing_id = await self._find_by_name(name)
             comment = self._build_comment(ip_local, ip_tailscale, role, services)
             payload = {"name": name, "comment": comment}
