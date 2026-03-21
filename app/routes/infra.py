@@ -10,9 +10,12 @@ from app.models.infra import (
     NoteResult,
     SeedResponse,
     ServerRegistrationResponse,
+    TicketCompleteRequest,
+    TicketCreateRequest,
+    TicketResponse,
 )
 from app.services.glpi_client import glpi_client
-from app.services.inventory import InventoryService
+from app.services.inventory import InventoryService, TicketService
 
 router = APIRouter(prefix="/api/v2.2/infra", tags=["Infraestructura"])
 
@@ -109,9 +112,6 @@ async def seed_servers():
 
 
 # --- Endpoints de Tickets por Servidor ---
-
-from app.models.infra import TicketCompleteRequest, TicketCreateRequest
-from app.services.inventory import TicketService
 
 
 def _get_ticket_service() -> TicketService:
