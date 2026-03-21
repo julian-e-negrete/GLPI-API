@@ -16,8 +16,8 @@ from mcp.types import (
 )
 
 # ── Config ────────────────────────────────────────────────────────────────────
-PROXY_URL   = "http://192.168.1.244"
-GLPI_URL    = "http://192.168.1.33"
+PROXY_URL   = "http://100.112.16.115:8080"
+GLPI_URL    = "http://100.70.84.114"
 CLIENT_ID   = "5880211c5e72134f1ae47dda08377e4b503bd3d15f93d858dda5ab82a4a000e0"
 CLIENT_SECRET = "b6d8fbdc08f6443abce916dae0d5184f56793a50782130e3c6fa6153692d165c"
 USERNAME    = "HaraiDasan"

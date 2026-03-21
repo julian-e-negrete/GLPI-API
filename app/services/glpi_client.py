@@ -145,14 +145,16 @@ class GLPIClient:
 
     async def check_connection(self) -> bool:
         """
-        Verifica la conexión con el servidor GLPI.
+        Verifica la conexión con el servidor GLPI usando el token OAuth.
 
         Returns:
-            True si hay conexión, False si no
+            True si hay conexión y el token es válido, False si no
         """
         try:
-            response = await self.get("/api.php/v2.2/init")
-            return response.status_code == 200
+            from app.services.oauth import oauth_manager
+            await oauth_manager.ensure_valid_token()
+            response = await self.get("/api.php/v2.2/Assets/Computer", params={"range": "0-1"})
+            return response.status_code in (200, 206)
         except Exception as e:
             logger.error(f"Error al verificar conexión con GLPI: {e}")
             return False
