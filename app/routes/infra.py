@@ -1,12 +1,18 @@
 """
 Router de infraestructura para gestionar el inventario de Computers en GLPI.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 
-from app.models.infra import ComputerUpsertRequest, ComputerUpsertResponse, SeedResponse
-from app.services.inventory import InventoryService
+from app.models.infra import (
+    ComputerUpsertRequest,
+    ComputerUpsertResponse,
+    DbInstanceResult,
+    NoteResult,
+    SeedResponse,
+    ServerRegistrationResponse,
+)
 from app.services.glpi_client import glpi_client
-
+from app.services.inventory import InventoryService
 
 router = APIRouter(prefix="/api/v2.2/infra", tags=["Infraestructura"])
 
@@ -16,81 +22,56 @@ SEED_SERVERS = [
         "ip_local": "192.168.1.244",
         "ip_tailscale": "100.112.16.115",
         "role": "scraping-proxy",
-        "services": [
-            "PostgreSQL-marketdata",
-            "MySQL-investments",
-            "Binance-API",
-            "Matriz-scraping",
-            "SMTP-alerts",
-            "GLPI-API-Proxy",
+        "databases": [
+            {"name": "marketdata-pg", "port": 5432, "version": "PostgreSQL", "comment": "PG_HOST=localhost | PG_USER=postgres | PG_DBNAME=marketdata"},
+            {"name": "investments-mysql", "port": 3306, "version": "MySQL", "comment": "MYSQL_HOST=localhost | MYSQL_USER=black | MYSQL_DATABASE=investments"},
         ],
-        "detail": (
-            "=== PostgreSQL (marketdata) ===\n"
-            "PG_HOST=localhost | PG_PORT=5432 | PG_DBNAME=marketdata | PG_USER=postgres\n\n"
-            "=== MySQL (investments) ===\n"
-            "MYSQL_HOST=localhost | MYSQL_USER=black | MYSQL_DATABASE=investments\n\n"
-            "=== Matriz Web Scraping ===\n"
-            "MATRIZ_USER=20452373484\n\n"
-            "=== Binance API ===\n"
-            "BINANCE_API_KEY=60H2cfydHlhKryRGJbCwWbqbX7lNMAVQjRmier9gy5mx8o0HnlRkRVkKNR7DG9Vr\n\n"
-            "=== SMTP Alerts ===\n"
-            "SMTP_SERVER=smtp.gmail.com | SMTP_PORT=587\n"
-            "EMAIL_SENDER=[email_sender] | EMAIL_RECEIVER=[email_receiver]\n\n"
-            "=== GLPI API Proxy ===\n"
-            "GLPI_API_URL=http://192.168.1.33:80 | PROXY_HOST=0.0.0.0 | PROXY_PORT=8080\n"
-            "GLPI_USERNAME=HaraiDasan"
-        ),
+        "note": "Tailscale: 100.112.16.115 | Binance API: key=60H2cfydHlhKryRGJbCwWbqbX7lNMAVQjRmier9gy5mx8o0HnlRkRVkKNR7DG9Vr | Matriz scraping: user=20452373484 | SMTP: smtp.gmail.com:587 sender=juliannegrete77@gmail.com | GLPI Proxy: port=8080",
     },
     {
         "name": "SRV-GLPI-PROCESSOR",
         "ip_local": "192.168.1.33",
         "ip_tailscale": "100.70.84.114",
         "role": "glpi-processor",
-        "services": [
-            "GLPI",
-            "MySQL-investments",
-            "PostgreSQL-marketdata",
-            "HFT-SDK",
-            "PPI-API",
-            "Binance",
+        "databases": [
+            {"name": "investments-mysql-proc", "port": 3306, "version": "MySQL", "comment": "DB_HOST=100.112.16.115 | DB_USER=haraidasan | DB_NAME=investments"},
+            {"name": "marketdata-pg-proc", "port": 5432, "version": "PostgreSQL", "comment": "POSTGRES_HOST=100.112.16.115 | POSTGRES_USER=postgres | POSTGRES_DB=marketdata"},
+            {"name": "marketdata-hft", "port": 5432, "version": "PostgreSQL", "comment": "HFT_DB_HOST=100.112.16.115 | HFT_DB_USER=postgres | HFT_DB_DB=marketdata"},
         ],
-        "detail": (
-            "=== GLPI ===\n"
-            "URL=http://192.168.1.33:80\n\n"
-            "=== MySQL (investments) ===\n"
-            "DB_HOST=100.112.16.115 | DB_PORT=3306 | DB_USER=haraidasan | DB_NAME=investments\n\n"
-            "=== PostgreSQL (marketdata) ===\n"
-            "POSTGRES_HOST=100.112.16.115 | POSTGRES_PORT=5432 | POSTGRES_USER=postgres | POSTGRES_DB=marketdata\n\n"
-            "=== HFT Database (PostgreSQL - Market Data) ===\n"
-            "HFT_DB_HOST=100.112.16.115 | HFT_DB_PORT=5432 | HFT_DB_DB=marketdata\n\n"
-            "=== Matriz Web Scraping ===\n"
-            "MATRIZ_USER=20452373484\n\n"
-            "=== HFT SDK ===\n"
-            "HFT_SDK_API_KEY_PROD=[prod_key] | HFT_SDK_API_KEY_UAT=[uat_key]\n\n"
-            "=== PPI (Portfolio Personal Inversiones) ===\n"
-            "PPI_PUBLIC_KEY=[public_key] | PPI_PRIVATE_KEY=[private_key]\n\n"
-            "=== Binance ===\n"
-            "BINANCE_API_KEY=60H2cfydHlhKryRGJbCwWbqbX7lNMAVQjRmier9gy5mx8o0HnlRkRVkKNR7DG9Vr"
-        ),
+        "note": "Tailscale: 100.70.84.114 | GLPI: http://192.168.1.33:80 | HFT SDK: API_KEY_PROD=nuDX73vj2483KSUgvenkj9t50oA0vgvA4WcuRAER API_KEY_UAT=1ypnPqtlG64lJIjrRN0DNut0hlIcQ502MiAbyo2g | PPI API: PUBLIC_KEY=UG5kSHRnVlF5dVdQT2JQUGtRVlM= | Binance API: key=60H2cfydHlhKryRGJbCwWbqbX7lNMAVQjRmier9gy5mx8o0HnlRkRVkKNR7DG9Vr | Matriz: user=20452373484",
     },
 ]
 
 
-@router.post("/computers", response_model=ComputerUpsertResponse)
-async def upsert_computer(body: ComputerUpsertRequest):
-    """Crea o actualiza un Computer en GLPI."""
+def _to_server_registration_response(result) -> ServerRegistrationResponse:
+    """Convierte un ServerRegistrationResult interno a ServerRegistrationResponse."""
+    return ServerRegistrationResponse(
+        computer=ComputerUpsertResponse(
+            status=result.computer.status,
+            glpi_id=result.computer.glpi_id,
+            error=result.computer.error,
+        ),
+        db_instances=[
+            DbInstanceResult(name=db["name"], id=db.get("id"), status=db["status"])
+            for db in result.db_instances
+        ],
+        note=NoteResult(id=result.note.get("id"), status=result.note.get("status", "error")),
+    )
+
+
+@router.post("/computers", response_model=ServerRegistrationResponse)
+async def register_computer(body: ComputerUpsertRequest):
+    """Registra un servidor completo: Computer + DatabaseInstances + Note."""
     service = InventoryService(glpi_client)
-    result = await service.upsert_computer(
+    result = await service.register_server(
         name=body.name,
         ip_local=body.ip_local,
         ip_tailscale=body.ip_tailscale,
         role=body.role,
-        services=body.services,
-        detail=body.detail,
+        databases=body.databases,
+        note_content=body.note,
     )
-    if result.status == "error":
-        raise HTTPException(status_code=502, detail=result.error)
-    return ComputerUpsertResponse(status=result.status, glpi_id=result.glpi_id)
+    return _to_server_registration_response(result)
 
 
 @router.get("/computers")
@@ -104,24 +85,24 @@ async def list_computers():
 async def seed_servers():
     """Ejecuta el seed de servidores conocidos en GLPI."""
     service = InventoryService(glpi_client)
-    results: dict[str, ComputerUpsertResponse] = {}
+    results: dict[str, ServerRegistrationResponse] = {}
 
     for server in SEED_SERVERS:
         try:
-            result = await service.upsert_computer(
+            result = await service.register_server(
                 name=server["name"],
                 ip_local=server["ip_local"],
                 ip_tailscale=server["ip_tailscale"],
                 role=server["role"],
-                services=server["services"],
-                detail=server.get("detail"),
+                databases=server["databases"],
+                note_content=server["note"],
             )
-            results[server["name"]] = ComputerUpsertResponse(
-                status=result.status,
-                glpi_id=result.glpi_id,
-                error=result.error,
-            )
+            results[server["name"]] = _to_server_registration_response(result)
         except Exception as e:
-            results[server["name"]] = ComputerUpsertResponse(status="error", error=str(e))
+            results[server["name"]] = ServerRegistrationResponse(
+                computer=ComputerUpsertResponse(status="error", error=str(e)),
+                db_instances=[],
+                note=NoteResult(status="error"),
+            )
 
     return SeedResponse(results=results)

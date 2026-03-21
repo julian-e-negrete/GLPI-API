@@ -15,8 +15,8 @@ class ComputerUpsertRequest(BaseModel):
     ip_local: str
     ip_tailscale: str
     role: str
-    services: list[str] = []
-    detail: Optional[str] = None
+    databases: list[dict] = []
+    note: str = ""
 
 
 class ComputerUpsertResponse(BaseModel):
@@ -26,9 +26,29 @@ class ComputerUpsertResponse(BaseModel):
     error: Optional[str] = None
 
 
+class DbInstanceResult(BaseModel):
+    """Resultado de la creación de una instancia de base de datos."""
+    name: str
+    id: Optional[int] = None
+    status: Literal["created", "error"]
+
+
+class NoteResult(BaseModel):
+    """Resultado de la creación de una nota."""
+    id: Optional[int] = None
+    status: Literal["created", "error"]
+
+
+class ServerRegistrationResponse(BaseModel):
+    """Respuesta completa del registro de un servidor."""
+    computer: ComputerUpsertResponse
+    db_instances: list[DbInstanceResult]
+    note: NoteResult
+
+
 class SeedResponse(BaseModel):
     """Respuesta del endpoint de seed con el resumen de todos los servidores."""
-    results: dict[str, ComputerUpsertResponse]
+    results: dict[str, ServerRegistrationResponse]
 
 
 @dataclass
@@ -37,3 +57,11 @@ class UpsertResult:
     status: Literal["created", "updated", "error"]
     glpi_id: Optional[int] = None
     error: Optional[str] = None
+
+
+@dataclass
+class ServerRegistrationResult:
+    """Resultado interno del registro completo de un servidor."""
+    computer: UpsertResult
+    db_instances: list[dict] = field(default_factory=list)
+    note: dict = field(default_factory=dict)
