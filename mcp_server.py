@@ -318,7 +318,10 @@ async def call_tool(name: str, arguments: dict) -> CallToolResult:
                 json=body,
                 timeout=15,
             )
-            return ok(r.json())
+            try:
+                return ok(r.json())
+            except Exception:
+                return ok({"status": r.status_code, "body": r.text or "ok"})
         except Exception as e:
             return err(str(e))
 
@@ -365,7 +368,10 @@ async def call_tool(name: str, arguments: dict) -> CallToolResult:
                 json={"solution": arguments.get("solution", "Tarea completada por agente.")},
                 timeout=15,
             )
-            return ok(r.json())
+            try:
+                return ok(r.json())
+            except Exception:
+                return ok({"status": r.status_code, "body": r.text or "ok"})
         except Exception as e:
             return err(str(e))
 

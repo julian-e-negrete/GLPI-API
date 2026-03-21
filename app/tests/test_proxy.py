@@ -522,3 +522,189 @@ class TestMiddleware:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
+
+
+# ============================================================================
+# TESTS - INVENTORY SERVICE (Feature: glpi-infrastructure-inventory)
+# ============================================================================
+
+class TestInventoryService:
+    """Tests de propiedad para InventoryService."""
+
+    # Feature: glpi-infrastructure-inventory, Propiedad 1: Upsert crea asset nuevo cuando no existe
+    @pytest.mark.asyncio
+    async def test_upsert_computer_creates_when_not_exists(self, mock_settings, mock_oauth_manager):
+        """Propiedad 1: upsert_computer hace POST y retorna status=created cuando el asset no existe."""
+        from app.services.inventory import InventoryService
+        from app.services.glpi_client import GLPIClient
+
+        client = GLPIClient()
+        service = InventoryService(client)
+
+        mock_post_response = Mock()
+        mock_post_response.status_code = 201
+        mock_post_response.json.return_value = {"id": 42}
+
+        with patch.object(service, '_find_by_name', new=AsyncMock(return_value=None)):
+            with patch.object(service, '_ensure_token', new=AsyncMock()):
+                with patch.object(client, 'post', new=AsyncMock(return_value=mock_post_response)) as mock_post:
+                    with patch.object(client, 'patch', new=AsyncMock()) as mock_patch:
+                        result = await service.upsert_computer("TEST-SRV", "10.0.0.1", "test-role")
+
+        assert result.status == "created"
+        assert result.glpi_id == 42
+        assert mock_post.called
+        assert not mock_patch.called
+
+    # Feature: glpi-infrastructure-inventory, Propiedad 2: Upsert actualiza sin duplicar cuando el asset ya existe
+    @pytest.mark.asyncio
+    async def test_upsert_computer_updates_when_exists(self, mock_settings, mock_oauth_manager):
+        """Propiedad 2: upsert_computer hace PATCH y retorna status=updated cuando el asset ya existe."""
+        from app.services.inventory import InventoryService
+        from app.services.glpi_client import GLPIClient
+
+        client = GLPIClient()
+        service = InventoryService(client)
+        existing_id = 99
+
+        mock_patch_response = Mock()
+        mock_patch_response.status_code = 200
+        mock_patch_response.json.return_value = {"id": existing_id}
+
+        with patch.object(service, '_find_by_name', new=AsyncMock(return_value=existing_id)):
+            with patch.object(service, '_ensure_token', new=AsyncMock()):
+                with patch.object(client, 'post', new=AsyncMock()) as mock_post:
+                    with patch.object(client, 'patch', new=AsyncMock(return_value=mock_patch_response)) as mock_patch:
+                        result = await service.upsert_computer("TEST-SRV", "10.0.0.1", "test-role")
+
+        assert result.status == "updated"
+        assert result.glpi_id == existing_id
+        assert not mock_post.called
+        assert mock_patch.called
+
+
+class TestTicketService:
+    """Tests de propiedad para TicketService."""
+
+    # Propiedad 3: create_ticket retorna id y status=created cuando el servidor existe
+    @pytest.mark.asyncio
+    async def test_create_ticket_success(self, mock_settings, mock_oauth_manager):
+        """Propiedad 3: create_ticket hace POST y retorna {id, status=created} cuando el servidor existe en GLPI."""
+        from app.services.inventory import InventoryService, TicketService
+        from app.services.glpi_client import GLPIClient
+
+        client = GLPIClient()
+        inventory = InventoryService(client)
+        service = TicketService(client, inventory)
+
+        mock_post_response = Mock()
+        mock_post_response.status_code = 201
+        mock_post_response.json.return_value = {"id": 10}
+
+        with patch.object(inventory, '_find_by_name', new=AsyncMock(return_value=1)):
+            with patch.object(inventory, '_ensure_token', new=AsyncMock()):
+                with patch.object(client, 'post', new=AsyncMock(return_value=mock_post_response)):
+                    result = await service.create_ticket(
+                        server_name="SRV-GLPI-PROCESSOR",
+                        title="Test task",
+                        description="Doing something",
+                        agent="kiro",
+                        urgency=3,
+                    )
+
+        assert result["id"] == 10
+        assert result["status"] == "created"
+        assert result["computer_id"] == 1
+
+    # Propiedad 4: create_ticket retorna error cuando el servidor no existe en GLPI
+    @pytest.mark.asyncio
+    async def test_create_ticket_server_not_found(self, mock_settings, mock_oauth_manager):
+        """Propiedad 4: create_ticket retorna {error} cuando el servidor no existe en GLPI."""
+        from app.services.inventory import InventoryService, TicketService
+        from app.services.glpi_client import GLPIClient
+
+        client = GLPIClient()
+        inventory = InventoryService(client)
+        service = TicketService(client, inventory)
+
+        with patch.object(inventory, '_find_by_name', new=AsyncMock(return_value=None)):
+            with patch.object(inventory, '_ensure_token', new=AsyncMock()):
+                result = await service.create_ticket(
+                    server_name="SRV-INEXISTENTE",
+                    title="Test",
+                    description="desc",
+                    agent="kiro",
+                    urgency=3,
+                )
+
+        assert "error" in result
+        assert "SRV-INEXISTENTE" in result["error"]
+
+    # Propiedad 5: complete_ticket hace PATCH con status=5 y retorna {id, status=resolved}
+    @pytest.mark.asyncio
+    async def test_complete_ticket_success(self, mock_settings, mock_oauth_manager):
+        """Propiedad 5: complete_ticket hace PATCH con status=5 y retorna {id, status=resolved}."""
+        from app.services.inventory import InventoryService, TicketService
+        from app.services.glpi_client import GLPIClient
+
+        client = GLPIClient()
+        inventory = InventoryService(client)
+        service = TicketService(client, inventory)
+
+        mock_patch_response = Mock()
+        mock_patch_response.status_code = 200
+        mock_patch_response.json.return_value = {"id": 26}
+
+        with patch.object(inventory, '_ensure_token', new=AsyncMock()):
+            with patch.object(client, 'patch', new=AsyncMock(return_value=mock_patch_response)) as mock_patch:
+                result = await service.complete_ticket(ticket_id=26, solution="Tarea completada.")
+
+        assert result["id"] == 26
+        assert result["status"] == "resolved"
+        # Verifica que se envió status=5 (resuelto) en el payload
+        call_kwargs = mock_patch.call_args
+        assert call_kwargs[1]["json_data"]["status"] == 5
+
+    # Propiedad 6: list_tickets retorna lista vacía cuando el servidor no existe
+    @pytest.mark.asyncio
+    async def test_list_tickets_server_not_found(self, mock_settings, mock_oauth_manager):
+        """Propiedad 6: list_tickets retorna [] cuando el servidor no existe en GLPI."""
+        from app.services.inventory import InventoryService, TicketService
+        from app.services.glpi_client import GLPIClient
+
+        client = GLPIClient()
+        inventory = InventoryService(client)
+        service = TicketService(client, inventory)
+
+        with patch.object(inventory, '_find_by_name', new=AsyncMock(return_value=None)):
+            with patch.object(inventory, '_ensure_token', new=AsyncMock()):
+                result = await service.list_tickets("SRV-INEXISTENTE")
+
+        assert result == []
+
+    # Propiedad 7: list_tickets excluye tickets eliminados (is_deleted=True)
+    @pytest.mark.asyncio
+    async def test_list_tickets_excludes_deleted(self, mock_settings, mock_oauth_manager):
+        """Propiedad 7: list_tickets filtra tickets con is_deleted=True."""
+        from app.services.inventory import InventoryService, TicketService
+        from app.services.glpi_client import GLPIClient
+
+        client = GLPIClient()
+        inventory = InventoryService(client)
+        service = TicketService(client, inventory)
+
+        raw_tickets = [
+            {"id": 1, "name": "Activo", "content": "desc", "status": 1, "is_deleted": False},
+            {"id": 2, "name": "Eliminado", "content": "desc", "status": 1, "is_deleted": True},
+        ]
+        mock_get_response = Mock()
+        mock_get_response.status_code = 200
+        mock_get_response.json.return_value = raw_tickets
+
+        with patch.object(inventory, '_find_by_name', new=AsyncMock(return_value=1)):
+            with patch.object(inventory, '_ensure_token', new=AsyncMock()):
+                with patch.object(client, 'get', new=AsyncMock(return_value=mock_get_response)):
+                    result = await service.list_tickets("SRV-GLPI-PROCESSOR")
+
+        assert len(result) == 1
+        assert result[0].id == 1
