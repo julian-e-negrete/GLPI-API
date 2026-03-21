@@ -1,0 +1,12 @@
+{
+  "name": "GLPI Task Complete",
+  "version": "1.0.0",
+  "description": "Al completar una tarea de spec, marca el ticket GLPI correspondiente como resuelto",
+  "when": {
+    "type": "postTaskExecution"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Una tarea de spec acaba de completarse. Si existe un ticket GLPI abierto para esta tarea (usa list_server_tickets para verificar en SRV-SCRAPING-PROXY y SRV-GLPI-PROCESSOR), usa complete_server_ticket para marcarlo como resuelto. La solución debe describir brevemente qué se implementó. Si no hay ticket abierto relacionado, no hagas nada."
+  }
+}
