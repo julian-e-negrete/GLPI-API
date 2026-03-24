@@ -57,9 +57,12 @@ async def _proxify_request(
     query_params = dict(request.query_params)
 
     # Headers adicionales del cliente
-    client_headers = {}
+    FORWARDED_HEADERS = {"glpi-entity", "glpi-profile", "glpi-entity-recursive", "accept-language"}
+    client_headers = {
+        k: v for k, v in request.headers.items()
+        if k.lower() in FORWARDED_HEADERS
+    }
     if authorization:
-        # Usar el token del cliente si se proporciona
         client_headers["Authorization"] = authorization
 
     # Obtener body
