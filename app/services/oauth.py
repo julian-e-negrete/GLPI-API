@@ -21,21 +21,24 @@ class OAuthManager:
         self.settings = get_settings()
         self._token_data: Optional[TokenData] = None
 
-    async def get_token(self, username: Optional[str] = None, password: Optional[str] = None, scope: str = "api user") -> TokenResponse:
+    async def get_token(self, username: Optional[str] = None, password: Optional[str] = None,
+                        client_id: Optional[str] = None, client_secret: Optional[str] = None,
+                        scope: str = "api user") -> TokenResponse:
         user = username or self.settings.glpi_username
         pwd = password or self.settings.glpi_password
+        cid = client_id or self.settings.glpi_client_id
+        csecret = client_secret or self.settings.glpi_client_secret
 
         if not user or not pwd:
             raise ValueError("Credenciales de usuario requeridas")
 
-        # Always send as form-urlencoded with explicit scope — GLPI ignores scope in JSON
         async with httpx.AsyncClient(timeout=self.settings.http_timeout) as client:
             response = await client.post(
                 self.settings.token_url,
                 data={
                     "grant_type": "password",
-                    "client_id": self.settings.glpi_client_id,
-                    "client_secret": self.settings.glpi_client_secret,
+                    "client_id": cid,
+                    "client_secret": csecret,
                     "username": user,
                     "password": pwd,
                     "scope": scope,

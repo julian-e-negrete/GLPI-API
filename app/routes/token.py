@@ -31,20 +31,13 @@ async def get_token(request: Request):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="grant_type debe ser 'password'")
 
-    from app.config import get_settings
-    settings = get_settings()
-
-    if body.client_id != settings.glpi_client_id:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="client_id inválido")
-
-    if body.client_secret != settings.glpi_client_secret:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="client_secret inválido")
-
     try:
         return await oauth_manager.get_token(
             username=body.username,
             password=body.password,
-            scope=body.scope or "api user"
+            client_id=body.client_id,
+            client_secret=body.client_secret,
+            scope=body.scope or "api user",
         )
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
