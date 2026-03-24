@@ -4,6 +4,17 @@ These rules must be followed by any agent using this proxy to interact with GLPI
 
 ---
 
+## Proxy Agent Identity
+
+The proxy authenticates to GLPI using the `GLPI_PROXY` user (id=`14`). This is a service account used only for authentication — it has no default role in tickets.
+
+Roles are always determined by the use case:
+- The **caller** (the agent or user making the request to the proxy) is the `requester`
+- The **target** (who the ticket is directed to) is `assigned`
+- `GLPI_PROXY` may appear as `assigned` only if a ticket is opened about a proxy malfunction
+
+---
+
 ## Proxy Base URL
 
 ```
