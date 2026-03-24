@@ -15,7 +15,23 @@ from app.services.oauth import oauth_manager
 from app.services.logger import proxy_logger
 
 
+import json as _json
+
+DEFAULT_OBSERVER_USER_ID = 7  # HaraiDasan
+
 router = APIRouter(prefix="/api/v2.2", tags=["Proxy"])
+
+
+async def _add_default_observer(ticket_id: int, headers: Dict[str, str]):
+    """Adds HaraiDasan as observer to every newly created ticket."""
+    await glpi_client.request(
+        method="POST",
+        endpoint=f"/api.php/v2.2/Assistance/Ticket/{ticket_id}/TeamMember",
+        json_data={"type": "User", "id": DEFAULT_OBSERVER_USER_ID, "role": "observer"},
+        headers=headers
+    )
+
+
 
 
 async def _extract_request_body(request: Request) -> Optional[bytes]:
@@ -115,6 +131,15 @@ async def _proxify_request(
             body=response.text,
             response_time_ms=response_time_ms
         )
+
+        # Auto-add default observer on ticket creation
+        if method == "POST" and resource == "Assistance/Ticket" and response.status_code in (200, 201):
+            try:
+                ticket_id = _json.loads(response.content).get("id")
+                if ticket_id:
+                    await _add_default_observer(ticket_id, client_headers)
+            except Exception:
+                pass
 
         # Construir respuesta
         headers = dict(response.headers)
