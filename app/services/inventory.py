@@ -174,8 +174,6 @@ class InventoryService:
 
 
 TICKET_ENDPOINT = "/api.php/v2.2/Assistance/Ticket"
-ITIL_SOLUTION_ENDPOINT = "/api.php/v2.2/Assistance/ITILSolution"
-USER_ENDPOINT = "/api.php/v2.2/Administration/User"
 
 # Mapeo de status GLPI
 TICKET_STATUS = {1: "Nuevo", 2: "En curso (asignado)", 3: "En curso (planificado)", 4: "Pendiente", 5: "Resuelto", 6: "Cerrado"}
@@ -189,25 +187,14 @@ class TicketService:
         self.inventory = inventory
 
     async def _resolve_computer(self, server_name: str) -> Optional[int]:
+        """Retorna el computer_id de un servidor por nombre, o None si no existe."""
         return await self.inventory._find_by_name(server_name)
-
-    async def _resolve_user_id(self, username: str) -> Optional[int]:
-        """Busca el users_id de un usuario por nombre."""
-        try:
-            response = await self.client.get(USER_ENDPOINT, params={"range": "0-500"})
-            if response.status_code != 200:
-                return None
-            for user in response.json():
-                if user.get("name") == username:
-                    return user["id"]
-        except Exception as e:
-            logger.error(f"Error buscando usuario '{username}': {e}")
-        return None
 
     def _parse_ticket(self, t: dict, computer_id: Optional[int] = None, computer_name: Optional[str] = None) -> TicketResponse:
         status = t.get("status", {})
         status_id = status.get("id", 0) if isinstance(status, dict) else status
         status_name = status.get("name", "") if isinstance(status, dict) else TICKET_STATUS.get(status_id, "")
+        # Extraer agente del campo content si fue embebido
         content = t.get("content", "")
         agent = None
         if content.startswith("[agent:") and "]" in content:
@@ -224,44 +211,27 @@ class TicketService:
             agent=agent,
         )
 
-    async def create_ticket(self, server_name: str, title: str, description: str,
-                            agent: str, urgency: int, requester: str = "julian") -> dict:
+    async def create_ticket(self, server_name: str, title: str, description: str, agent: str, urgency: int) -> dict:
         """Crea un ticket en GLPI vinculado al Computer del servidor dado."""
         await self.inventory._ensure_token()
         computer_id = await self._resolve_computer(server_name)
         if computer_id is None:
             return {"error": f"Servidor '{server_name}' no encontrado en GLPI"}
 
-        # Resolve requester user_id
-        requester_id = await self._resolve_user_id(requester)
-
+        # Embebemos el agente en el content para trazabilidad
         content = f"[agent:{agent}] {description}"
         payload = {
             "name": title,
             "content": content,
             "urgency": urgency,
-            "type": 2,
+            "type": 2,  # demanda (no incidente)
             "items_id": computer_id,
             "itemtype": "Computer",
         }
-        if requester_id:
-            payload["users_id_recipient"] = requester_id
-
         response = await self.client.post(TICKET_ENDPOINT, json_data=payload)
         if response.status_code not in (200, 201):
             return {"error": f"{response.status_code}: {response.text}"}
         ticket_id = response.json()["id"]
-
-        # Add requester as actor if resolved
-        if requester_id:
-            try:
-                await self.client.post(
-                    f"{TICKET_ENDPOINT}/{ticket_id}/User",
-                    json_data={"users_id": requester_id, "type": 1},  # type=1 → requester
-                )
-            except Exception as e:
-                logger.warning(f"Could not add requester actor: {e}")
-
         return {"id": ticket_id, "status": "created", "computer_id": computer_id}
 
     async def list_tickets(self, server_name: str) -> list[TicketResponse]:
@@ -271,11 +241,7 @@ class TicketService:
         if computer_id is None:
             return []
 
-        # Filter by linked computer item
-        response = await self.client.get(
-            TICKET_ENDPOINT,
-            params={"range": "0-500", "searchText[items_id]": computer_id, "itemtype": "Computer"},
-        )
+        response = await self.client.get(TICKET_ENDPOINT, params={"range": "0-500"})
         if response.status_code != 200:
             return []
 
@@ -284,23 +250,14 @@ class TicketService:
         for t in tickets:
             if t.get("is_deleted"):
                 continue
-            status = t.get("status", {})
-            status_id = status.get("id", 0) if isinstance(status, dict) else status
-            if status_id in (5, 6):  # skip resolved/closed
-                continue
             result.append(self._parse_ticket(t, computer_id, server_name))
         return result
 
     async def complete_ticket(self, ticket_id: int, solution: str) -> dict:
-        """Marca un ticket como resuelto con solución via ITILSolution."""
+        """Marca un ticket como resuelto (status=5) con una solución."""
         await self.inventory._ensure_token()
-        # 1. Set status=5 on the ticket
-        await self.client.patch(f"{TICKET_ENDPOINT}/{ticket_id}", json_data={"status": 5})
-        # 2. Post solution via ITILSolution (the correct GLPI endpoint)
-        sol_response = await self.client.post(
-            ITIL_SOLUTION_ENDPOINT,
-            json_data={"itemtype": "Ticket", "items_id": ticket_id, "content": solution},
-        )
-        if sol_response.status_code not in (200, 201):
-            logger.warning(f"ITILSolution post failed: {sol_response.status_code} {sol_response.text}")
+        payload = {"status": 5, "solution": solution}
+        response = await self.client.patch(f"{TICKET_ENDPOINT}/{ticket_id}", json_data=payload)
+        if response.status_code not in (200, 201):
+            return {"error": f"{response.status_code}: {response.text}"}
         return {"id": ticket_id, "status": "resolved"}

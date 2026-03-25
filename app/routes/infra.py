@@ -128,7 +128,6 @@ async def create_server_ticket(server_name: str, body: TicketCreateRequest):
         description=body.description,
         agent=body.agent,
         urgency=body.urgency,
-        requester=body.requester,
     )
 
 
