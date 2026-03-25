@@ -73,8 +73,9 @@ class TicketCreateRequest(BaseModel):
     """Request para crear un ticket vinculado a un servidor."""
     title: str
     description: str
-    agent: str = "kiro"  # nombre del agente que crea el ticket
-    urgency: Literal[1, 2, 3, 4, 5] = 3  # 1=muy alta, 5=muy baja
+    agent: str = "kiro"
+    urgency: Literal[1, 2, 3, 4, 5] = 3
+    requester: str = "julian"  # username del solicitante en GLPI
 
 class TicketResponse(BaseModel):
     """Respuesta de un ticket de GLPI."""
