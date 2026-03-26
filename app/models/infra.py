@@ -90,3 +90,9 @@ class TicketResponse(BaseModel):
 class TicketCompleteRequest(BaseModel):
     """Request para completar un ticket con una solución."""
     solution: str = "Tarea completada por agente."
+
+
+class TicketFollowupRequest(BaseModel):
+    """Request para agregar un followup a un ticket."""
+    content: str
+    is_private: bool = False

@@ -261,3 +261,15 @@ class TicketService:
         if response.status_code not in (200, 201):
             return {"error": f"{response.status_code}: {response.text}"}
         return {"id": ticket_id, "status": "resolved"}
+
+    async def add_followup(self, ticket_id: int, content: str, is_private: bool = False) -> dict:
+        """Agrega un followup (comentario) a un ticket sin cerrarlo."""
+        await self.inventory._ensure_token()
+        response = await self.client.post(
+            f"{TICKET_ENDPOINT}/{ticket_id}/Timeline/Followup",
+            json_data={"content": content, "is_private": is_private}
+        )
+        if response.status_code not in (200, 201):
+            return {"error": f"{response.status_code}: {response.text}"}
+        data = response.json()
+        return {"id": data.get("id"), "status": "created"}
