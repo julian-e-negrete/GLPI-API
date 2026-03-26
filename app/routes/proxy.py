@@ -137,7 +137,7 @@ async def _proxify_request(
             try:
                 ticket_id = _json.loads(response.content).get("id")
                 if ticket_id:
-                    await _add_default_observer(ticket_id, client_headers)
+                    await _add_default_observer(ticket_id, {"Authorization": authorization})
             except Exception:
                 pass
 

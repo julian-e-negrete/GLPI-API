@@ -25,7 +25,7 @@ http://192.168.1.38:8080/api/v2.2
 
 ## Step 1 — Authenticate
 
-Always request a token before any operation. Include `scope: "api user"` or it will be rejected by GLPI.
+Always request a token before any operation. Include `scope: "api user"` or GLPI will reject the request.
 
 ```
 POST /token
@@ -57,14 +57,7 @@ GET /Administration/User?limit=100
 Authorization: Bearer <token>
 ```
 
-Each user object has:
-- `id` — numeric ID used in all API calls
-- `username` — the login name
-
-Alternatively look up by username:
-```
-GET /Administration/User/username/{username}
-```
+Each user object has `id` (numeric) and `username` (login name).
 
 ---
 
@@ -85,13 +78,13 @@ Content-Type: application/json
 }
 ```
 
-The response returns `{ "id": <ticket_id>, "href": "..." }`. Save the `id`.
+Response: `{ "id": <ticket_id>, "href": "..." }`. Save the `id`.
 
 ---
 
 ## Step 4 — Assign Actors via TeamMember
 
-**This is mandatory.** The ticket body does NOT set requester/assigned. You must call TeamMember after creation.
+The ticket body does NOT set requester/assigned. Always call TeamMember after creation.
 
 ```
 POST /Assistance/Ticket/{ticket_id}/TeamMember
@@ -106,28 +99,18 @@ Content-Type: application/json
 ```
 
 Valid roles:
+
 | Role | GLPI field | Meaning |
 |---|---|---|
-| `requester` | Solicitante | Who is opening/requesting the ticket |
+| `requester` | Solicitante | Who is opening the ticket |
 | `assigned` | Asignado a | Who is responsible for resolving it |
 | `observer` | Observador | CC / watcher |
 
-### Role convention
+---
 
-- The **agent making the request** (the one authenticated via the proxy) → `requester`
-- The **target user or system** the ticket is directed to → `assigned`
+## Observer Policy
 
-### Example
-
-Agent `GLPI_PROXY` (id=14) creates a ticket directed to `AlgoTrade Server` (id=13):
-
-```json
-// Requester — the agent itself
-{ "type": "User", "id": 14, "role": "requester" }
-
-// Assigned — the target
-{ "type": "User", "id": 13, "role": "assigned" }
-```
+Every ticket created via the proxy **automatically** includes **HaraiDasan (id=7)** as observer. This is enforced server-side — clients do not need to add it manually.
 
 ---
 
@@ -137,9 +120,79 @@ Agent `GLPI_PROXY` (id=14) creates a ticket directed to `AlgoTrade Server` (id=1
 1. POST /token                                  → get access_token
 2. GET  /Administration/User?limit=100          → resolve user IDs
 3. POST /Assistance/Ticket                      → create ticket, get ticket_id
-4. POST /Assistance/Ticket/{id}/TeamMember      → add requester (yourself)
-5. POST /Assistance/Ticket/{id}/TeamMember      → add assigned (target user)
+4. POST /Assistance/Ticket/{id}/TeamMember      → add requester (the caller)
+5. POST /Assistance/Ticket/{id}/TeamMember      → add assigned (the target)
 ```
+
+---
+
+## ITIL Workflow Endpoints (Problem, Change, Task)
+
+Use these when the situation calls for more than a simple ticket:
+
+| Situation | Endpoint | When to use |
+|---|---|---|
+| Recurring incident | `POST /Assistance/Problem` | Same issue keeps happening |
+| Planned fix / service change | `POST /Assistance/Change` | Before applying a code fix or restart |
+| Scheduled maintenance | `POST /Project/Task` | Recurring checks, maintenance windows |
+
+### Problem
+
+```
+GET    /Assistance/Problem
+POST   /Assistance/Problem
+GET    /Assistance/Problem/{id}
+PATCH  /Assistance/Problem/{id}
+GET    /Assistance/Problem/{id}/Timeline/Followup
+POST   /Assistance/Problem/{id}/Timeline/Followup
+```
+
+### Change
+
+```
+GET    /Assistance/Change
+POST   /Assistance/Change
+GET    /Assistance/Change/{id}
+PATCH  /Assistance/Change/{id}
+GET    /Assistance/Change/{id}/Timeline/Followup
+POST   /Assistance/Change/{id}/Timeline/Followup
+```
+
+### Task
+
+```
+GET    /Project/Task
+POST   /Project/Task
+GET    /Project/Task/{id}
+PATCH  /Project/Task/{id}
+```
+
+TeamMember (requester/assigned/observer) works the same way on Problem and Change as on Ticket.
+
+---
+
+## Reading & Replying to Tickets
+
+```
+# List tickets assigned to you (filter server-side)
+GET /Tickets?assigned_id={your_user_id}&status_id={status}
+
+# Read full ticket
+GET /Assistance/Ticket/{id}
+
+# Read conversation thread
+GET /Assistance/Ticket/{id}/Timeline/Followup
+
+# Post a reply
+POST /Assistance/Ticket/{id}/Timeline/Followup
+{ "content": "<text>", "is_private": false }
+
+# Update status
+PATCH /Assistance/Ticket/{id}
+{ "status": {"id": 5} }
+```
+
+Status IDs: `1`=New `2`=Processing `4`=Pending `5`=Solved `6`=Closed
 
 ---
 
@@ -158,8 +211,8 @@ Agent `GLPI_PROXY` (id=14) creates a ticket directed to `AlgoTrade Server` (id=1
 
 | Field | Type | Values |
 |---|---|---|
-| `type` | int | `1` = Incident, `2` = Request |
+| `type` | int | `1`=Incident `2`=Request |
 | `urgency` | int | `1`=Very low `2`=Low `3`=Medium `4`=High `5`=Very high |
 | `impact` | int | same scale as urgency |
 | `priority` | int | same scale as urgency |
-| `status` | int | `1`=New `2`=Processing(assigned) `3`=Processing(planned) `4`=Pending `5`=Solved `6`=Closed |
+| `status` | int | `1`=New `2`=Processing `4`=Pending `5`=Solved `6`=Closed |
