@@ -148,6 +148,6 @@ async def complete_server_ticket(server_name: str, ticket_id: int, body: TicketC
 
 @router.post("/servers/{server_name}/tickets/{ticket_id}/followup")
 async def add_ticket_followup(server_name: str, ticket_id: int, body: TicketFollowupRequest):
-    """Agrega un followup (comentario) a un ticket sin cerrarlo."""
+    """Agrega un followup a un ticket sin cerrarlo."""
     svc = _get_ticket_service()
-    return await svc.add_followup(ticket_id, body.content, body.is_private)
+    return await svc.add_followup(ticket_id, body.content)

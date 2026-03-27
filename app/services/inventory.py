@@ -253,6 +253,15 @@ class TicketService:
             result.append(self._parse_ticket(t, computer_id, server_name))
         return result
 
+    async def add_followup(self, ticket_id: int, content: str) -> dict:
+        """Agrega un followup (comentario) a un ticket sin cerrarlo."""
+        await self.inventory._ensure_token()
+        payload = {"itemtype": "Ticket", "items_id": ticket_id, "content": content}
+        response = await self.client.post("/api.php/v2.2/Assistance/ITILFollowup", json_data=payload)
+        if response.status_code not in (200, 201):
+            return {"error": f"{response.status_code}: {response.text}"}
+        return {"id": response.json().get("id"), "status": "created"}
+
     async def complete_ticket(self, ticket_id: int, solution: str) -> dict:
         """Marca un ticket como resuelto (status=5) con una solución."""
         await self.inventory._ensure_token()
