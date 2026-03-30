@@ -216,6 +216,31 @@ TOOLS = [
             "required": ["path", "body"],
         },
     ),
+    Tool(
+        name="update_ticket",
+        description="Update ticket status and/or add a followup comment in one call.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "ticket_id": {"type": "integer", "description": "GLPI ticket ID"},
+                "status_id": {"type": "integer", "description": "New status: 1=New 2=Processing 4=Pending 5=Solved 6=Closed"},
+                "followup": {"type": "string", "description": "Optional followup comment to add"},
+            },
+            "required": ["ticket_id"],
+        },
+    ),
+    Tool(
+        name="reassign_ticket",
+        description="Reassign a ticket to a different user (replaces current assigned member).",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "ticket_id": {"type": "integer", "description": "GLPI ticket ID"},
+                "assigned_id": {"type": "integer", "description": "User ID to assign the ticket to"},
+            },
+            "required": ["ticket_id", "assigned_id"],
+        },
+    ),
 ]
 
 
@@ -371,6 +396,40 @@ async def call_tool(name: str, arguments: dict) -> CallToolResult:
                 return ok(r.json())
             except Exception:
                 return ok({"status": r.status_code, "body": r.text or "ok"})
+        except Exception as e:
+            return err(str(e))
+
+    if name == "update_ticket":
+        ticket_id = arguments.get("ticket_id")
+        try:
+            token = _get_token()
+            headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+            results = {}
+            if "status_id" in arguments:
+                r = httpx.patch(f"{PROXY_URL}/api/v2.2/Tickets/{ticket_id}/status",
+                                headers=headers, json={"status_id": arguments["status_id"]}, timeout=15)
+                results["status"] = r.json()
+            if arguments.get("followup"):
+                r = httpx.post(f"{PROXY_URL}/api/v2.2/Tickets/{ticket_id}/followup",
+                               headers=headers, json={"content": arguments["followup"], "is_private": False}, timeout=15)
+                results["followup"] = r.json()
+            return ok(results)
+        except Exception as e:
+            return err(str(e))
+
+    if name == "reassign_ticket":
+        ticket_id = arguments.get("ticket_id")
+        assigned_id = arguments.get("assigned_id")
+        try:
+            token = _get_token()
+            headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+            # Remove current assigned member
+            httpx.delete(f"{PROXY_URL}/api/v2.2/Assistance/Ticket/{ticket_id}/TeamMember",
+                         headers=headers, json={"type": "User", "role": "assigned"}, timeout=15)
+            # Add new assigned member
+            r = httpx.post(f"{PROXY_URL}/api/v2.2/Assistance/Ticket/{ticket_id}/TeamMember",
+                           headers=headers, json={"type": "User", "id": assigned_id, "role": "assigned"}, timeout=15)
+            return ok(r.json())
         except Exception as e:
             return err(str(e))
 

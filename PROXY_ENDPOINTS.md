@@ -78,33 +78,61 @@ Proxy health + GLPI connectivity check. No auth required.
 
 ### `GET /api/v2.2/Tickets`
 
-List tickets with optional filtering. Combines native GLPI RSQL filtering (for status) with client-side filtering (for assigned user).
+List tickets with optional filtering.
 
 **Query params**
 
 | Param | Type | Description |
 |---|---|---|
-| `status_id` | int | Filter by status. Passed as native RSQL `filter=status.id==N` to GLPI. |
-| `assigned_id` | int | Filter by assigned user ID. Filtered from the `team` array in each ticket. |
+| `status_id` | int | Native RSQL filter. 1=New 2=Processing 4=Pending 5=Solved 6=Closed |
+| `assigned_id` | int | Filter by assigned user ID (from `team` array) |
+| `requester_id` | int | Filter by requester user ID (from `team` array) |
 | `start` | int | Pagination offset (default `0`) |
 | `limit` | int | Page size (default `50`) |
 
-**Status values**
+---
 
-| ID | Meaning |
-|---|---|
-| `1` | New |
-| `2` | Processing (assigned) |
-| `4` | Pending |
-| `5` | Solved |
-| `6` | Closed |
+### `POST /api/v2.2/Tickets`
 
-**Example — tickets assigned to GLPI_PROXY (id=14) in progress**
+Create a ticket with requester and assigned user set in one call.
+
+**Body**
+```json
+{
+  "title": "Ticket title",
+  "content": "Description",
+  "requester_id": 14,
+  "assigned_id": 13,
+  "type": 1,
+  "urgency": 3,
+  "impact": 3,
+  "priority": 3
+}
 ```
-GET /api/v2.2/Tickets?assigned_id=14&status_id=2
+
+`type`: 1=Incident, 2=Request. Urgency/impact/priority: 1=Very high → 5=Very low.
+
+---
+
+### `POST /api/v2.2/Tickets/{id}/followup`
+
+Add a followup comment to a ticket.
+
+**Body**
+```json
+{ "content": "Comment text.", "is_private": false }
 ```
 
-**Response** — array of ticket objects (same schema as GLPI's `/Assistance/Ticket`).
+---
+
+### `PATCH /api/v2.2/Tickets/{id}/status`
+
+Update ticket status.
+
+**Body**
+```json
+{ "status_id": 5 }
+```
 
 ---
 
@@ -147,86 +175,6 @@ If `Authorization` is omitted and a valid token is cached in memory, the proxy u
 |---|---|
 | `401` | No token and no cached token |
 | `502` | GLPI server unreachable |
-
----
-
-## Infrastructure (server inventory)
-
-### `POST /api/v2.2/infra/computers`
-
-Register a server as a Computer asset in GLPI (upsert by name).
-
-**Body**
-```json
-{
-  "name": "SRV-SCRAPING-PROXY",
-  "ip_local": "192.168.1.244",
-  "ip_tailscale": "100.112.16.115",
-  "role": "scraping-proxy",
-  "databases": [
-    { "name": "marketdata-pg", "port": 5432, "version": "PostgreSQL", "comment": "..." }
-  ],
-  "note": "Free-text note attached to the computer"
-}
-```
-
----
-
-### `GET /api/v2.2/infra/computers`
-
-List all Computer assets registered in GLPI.
-
----
-
-### `POST /api/v2.2/infra/seed`
-
-Seed the two known servers (`SRV-SCRAPING-PROXY`, `SRV-GLPI-PROCESSOR`) into GLPI with their full configuration.
-
----
-
-### `POST /api/v2.2/infra/servers/{server_name}/tickets`
-
-Create a ticket linked to a server.
-
-**Body**
-```json
-{
-  "title": "Task title",
-  "description": "Full description",
-  "agent": "kiro",
-  "urgency": 3
-}
-```
-
-Urgency: `1`=Very high → `5`=Very low.
-
----
-
-### `GET /api/v2.2/infra/servers/{server_name}/tickets`
-
-List all active tickets for a server.
-
----
-
-### `PATCH /api/v2.2/infra/servers/{server_name}/tickets/{ticket_id}/complete`
-
-Mark a ticket as solved.
-
-**Body**
-```json
-{ "solution": "Description of what was done." }
-```
-
----
-
-### `POST /api/v2.2/infra/servers/{server_name}/tickets/{ticket_id}/followup`
-
-Add a followup comment to a ticket without closing it.
-
-**Body**
-```json
-{ "content": "Update text." }
-```
 
 ---
 
