@@ -1,6 +1,7 @@
 """
 Convenience endpoints for ticket querying.
-Adds server-side filtering by assigned_user and status on top of the generic proxy.
+- status_id is translated to a native GLPI RSQL filter (fast, server-side)
+- assigned_id is filtered client-side using the 'team' array already in each ticket response
 """
 from typing import Optional
 from fastapi import APIRouter, Request, HTTPException, Header, status
@@ -20,12 +21,11 @@ async def list_tickets(
     authorization: Optional[str] = Header(None, alias="Authorization")
 ):
     """
-    List tickets with optional server-side filtering by assigned user and/or status.
+    List tickets filtered by status and/or assigned user.
 
-    Query params:
-    - assigned_id: filter tickets where a user with this ID has role 'assigned'
-    - status_id:   1=New 2=Processing 4=Pending 5=Solved 6=Closed
-    - start, limit: pagination
+    - status_id: passed as native RSQL filter to GLPI (1=New 2=Processing 4=Pending 5=Solved 6=Closed)
+    - assigned_id: filtered client-side from the 'team' array in each ticket
+    - start, limit: pagination passed to GLPI
     """
     if not authorization:
         cached = oauth_manager.get_cached_token()
@@ -35,38 +35,29 @@ async def list_tickets(
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token required")
 
     headers = {"Authorization": authorization}
+    params = {"start": start, "limit": limit}
 
-    response = await glpi_client.request(
+    if status_id is not None:
+        params["filter"] = f"status.id=={status_id}"
+
+    r = await glpi_client.request(
         "GET", "/api.php/v2.2/Assistance/Ticket",
-        params={"start": start, "limit": 200},
+        params=params,
         headers=headers
     )
 
-    if response.status_code != 200:
-        return response.json()
+    if r.status_code != 200:
+        return r.json()
 
-    tickets = response.json()
+    tickets = r.json()
 
-    # Filter by status
-    if status_id is not None:
+    if assigned_id is not None:
         tickets = [
             t for t in tickets
-            if (isinstance(t.get("status"), dict) and t["status"].get("id") == status_id)
-            or t.get("status") == status_id
-        ]
-
-    # Filter by assigned user (requires per-ticket TeamMember lookup)
-    if assigned_id is not None:
-        filtered = []
-        for ticket in tickets:
-            tm_resp = await glpi_client.request(
-                "GET", f"/api.php/v2.2/Assistance/Ticket/{ticket['id']}/TeamMember",
-                headers=headers
+            if any(
+                m.get("id") == assigned_id and m.get("role") == "assigned"
+                for m in (t.get("team") or [])
             )
-            if tm_resp.status_code == 200:
-                members = tm_resp.json()
-                if any(m.get("id") == assigned_id and m.get("role") == "assigned" for m in members):
-                    filtered.append(ticket)
-        tickets = filtered
+        ]
 
     return tickets
