@@ -16,13 +16,12 @@ from mcp.types import (
 )
 
 # ── Config ────────────────────────────────────────────────────────────────────
-PROXY_URL   = "http://100.112.16.115:8080"
-GLPI_URL    = "http://100.70.84.114"
-CLIENT_ID   = "5880211c5e72134f1ae47dda08377e4b503bd3d15f93d858dda5ab82a4a000e0"
-CLIENT_SECRET = "b6d8fbdc08f6443abce916dae0d5184f56793a50782130e3c6fa6153692d165c"
-USERNAME    = "HaraiDasan"
+PROXY_URL   = "http://192.168.1.244:8080"
+CLIENT_ID   = "ecd3715c5e6b2749bb592131721d154deb0d4823f6df547c3e617aa0a1679bcf"
+CLIENT_SECRET = "2d4aa87d86ee7db68d1355aadcee595540ab9c25000a0cbbfe253e00f02f4ca7"
+USERNAME    = "GLPI_PROXY"
 PASSWORD    = "45237348"
-REPO_PATH   = "/home/haraidasan/programming/GLPI-API"
+REPO_PATH   = "/home/julian/programming/GLPI-API"
 
 server = Server("glpi-api-proxy")
 
@@ -38,8 +37,8 @@ def _git_file(branch: str, path: str) -> str:
 
 def _get_token() -> str:
     r = httpx.post(
-        f"{GLPI_URL}/api.php/token",
-        data={
+        f"{PROXY_URL}/api/v2.2/token",
+        json={
             "grant_type": "password",
             "client_id": CLIENT_ID,
             "client_secret": CLIENT_SECRET,
