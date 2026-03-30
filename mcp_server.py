@@ -1,11 +1,9 @@
 """
 GLPI API Proxy — MCP Server
-Exposes proxy documentation, GLPI endpoint catalog, lessons learned,
-and live proxy tools as MCP resources and tools.
+Tools for interacting with GLPI through the proxy.
 """
 import asyncio
 import json
-import subprocess
 import httpx
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -16,229 +14,168 @@ from mcp.types import (
 )
 
 # ── Config ────────────────────────────────────────────────────────────────────
-PROXY_URL   = "http://192.168.1.244:8080"
-CLIENT_ID   = "ecd3715c5e6b2749bb592131721d154deb0d4823f6df547c3e617aa0a1679bcf"
+PROXY_URL     = "http://192.168.1.244:8080"
+CLIENT_ID     = "ecd3715c5e6b2749bb592131721d154deb0d4823f6df547c3e617aa0a1679bcf"
 CLIENT_SECRET = "2d4aa87d86ee7db68d1355aadcee595540ab9c25000a0cbbfe253e00f02f4ca7"
-USERNAME    = "GLPI_PROXY"
-PASSWORD    = "45237348"
-REPO_PATH   = "/home/julian/programming/GLPI-API"
+USERNAME      = "GLPI_PROXY"
+PASSWORD      = "45237348"
 
 server = Server("glpi-api-proxy")
 
 
-def _git_file(branch: str, path: str) -> str:
-    """Read a file from a git branch without checking it out."""
-    result = subprocess.run(
-        ["git", "show", f"{branch}:{path}"],
-        cwd=REPO_PATH, capture_output=True, text=True
-    )
-    return result.stdout if result.returncode == 0 else f"[File not found: {branch}:{path}]"
-
-
+# ── Auth ──────────────────────────────────────────────────────────────────────
 def _get_token() -> str:
-    r = httpx.post(
-        f"{PROXY_URL}/api/v2.2/token",
-        json={
-            "grant_type": "password",
-            "client_id": CLIENT_ID,
-            "client_secret": CLIENT_SECRET,
-            "username": USERNAME,
-            "password": PASSWORD,
-            "scope": "api user",
-        },
-        timeout=15,
-    )
+    r = httpx.post(f"{PROXY_URL}/api/v2.2/token", json={
+        "grant_type": "password",
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+        "username": USERNAME,
+        "password": PASSWORD,
+        "scope": "api user",
+    }, timeout=15)
     return r.json()["access_token"]
 
 
-# ── Resources ─────────────────────────────────────────────────────────────────
-RESOURCES = [
-    Resource(
-        uri="glpi://docs/readme",
-        name="README — Proxy Setup & API Usage",
-        description="Full setup guide, endpoint reference and usage examples (docs/proxy-setup branch)",
-        mimeType="text/markdown",
-    ),
-    Resource(
-        uri="glpi://docs/spec",
-        name="SPEC — Technical Specification",
-        description="Architecture, OAuth flow, all GLPI v2.2 endpoints catalog (docs/proxy-setup branch)",
-        mimeType="text/markdown",
-    ),
-    Resource(
-        uri="glpi://docs/lessons",
-        name="Lessons Learned — Integration Guide",
-        description="Scope gotchas, correct POST formats, Postman setup, error reference (docs/api-testing branch)",
-        mimeType="text/markdown",
-    ),
-    Resource(
-        uri="glpi://docs/seed-script",
-        name="Seed Script — Mock Data",
-        description="Python script that populates GLPI with realistic test data (docs/api-testing branch)",
-        mimeType="text/x-python",
-    ),
-    Resource(
-        uri="glpi://docs/seed-results",
-        name="Seed Results — Last Run",
-        description="JSON results of the last mock data seeding run (docs/api-testing branch)",
-        mimeType="application/json",
-    ),
-]
-
-
-@server.list_resources()
-async def list_resources() -> ListResourcesResult:
-    return ListResourcesResult(resources=RESOURCES)
-
-
-@server.read_resource()
-async def read_resource(uri: str) -> ReadResourceResult:
-    mapping = {
-        "glpi://docs/readme":       ("docs/proxy-setup", "README.md"),
-        "glpi://docs/spec":         ("docs/proxy-setup", "SPEC.md"),
-        "glpi://docs/lessons":      ("docs/api-testing", "LESSONS_LEARNED.md"),
-        "glpi://docs/seed-script":  ("docs/api-testing", "seed_mock_data.py"),
-        "glpi://docs/seed-results": ("docs/api-testing", "seed_results.json"),
-    }
-    if uri not in mapping:
-        return ReadResourceResult(contents=[TextContent(type="text", text=f"Unknown resource: {uri}")])
-    branch, path = mapping[uri]
-    content = _git_file(branch, path)
-    return ReadResourceResult(contents=[TextContent(type="text", text=content)])
+def _headers() -> dict:
+    return {"Authorization": f"Bearer {_get_token()}", "Content-Type": "application/json"}
 
 
 # ── Tools ─────────────────────────────────────────────────────────────────────
 TOOLS = [
     Tool(
         name="proxy_health",
-        description="Check the health of the GLPI API proxy and its connection to GLPI.",
+        description="Check proxy and GLPI connectivity. No auth required.",
         inputSchema={"type": "object", "properties": {}},
     ),
     Tool(
-        name="glpi_get",
-        description="Make a GET request to any GLPI endpoint through the proxy. Example path: /Assistance/Ticket",
+        name="list_users",
+        description="List all GLPI users with their IDs and usernames.",
+        inputSchema={"type": "object", "properties": {}},
+    ),
+    Tool(
+        name="list_tickets",
+        description="List tickets with optional filters.",
         inputSchema={
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "GLPI resource path, e.g. /Assistance/Ticket or /Administration/User"}
+                "status_id": {"type": "integer", "description": "1=New 2=Processing 4=Pending 5=Solved 6=Closed"},
+                "assigned_id": {"type": "integer", "description": "Filter by assigned user ID"},
+                "requester_id": {"type": "integer", "description": "Filter by requester user ID"},
+                "limit": {"type": "integer", "default": 50},
+                "start": {"type": "integer", "default": 0},
+            },
+        },
+    ),
+    Tool(
+        name="get_ticket",
+        description="Get full details of a ticket including timeline/followups.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "ticket_id": {"type": "integer"},
+                "include_followups": {"type": "boolean", "default": False},
+            },
+            "required": ["ticket_id"],
+        },
+    ),
+    Tool(
+        name="create_ticket",
+        description="Create a ticket with requester and assigned user.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "content": {"type": "string"},
+                "requester_id": {"type": "integer", "description": "User ID of who opens the ticket"},
+                "assigned_id": {"type": "integer", "description": "User ID of who resolves the ticket"},
+                "type": {"type": "integer", "description": "1=Incident 2=Request", "default": 1},
+                "urgency": {"type": "integer", "description": "1=Very high 3=Medium 5=Very low", "default": 3},
+            },
+            "required": ["title", "content", "requester_id", "assigned_id"],
+        },
+    ),
+    Tool(
+        name="add_followup",
+        description="Add a followup comment to a ticket.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "ticket_id": {"type": "integer"},
+                "content": {"type": "string"},
+                "is_private": {"type": "boolean", "default": False},
+            },
+            "required": ["ticket_id", "content"],
+        },
+    ),
+    Tool(
+        name="update_ticket_status",
+        description="Update the status of a ticket. 1=New 2=Processing 4=Pending 5=Solved 6=Closed",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "ticket_id": {"type": "integer"},
+                "status_id": {"type": "integer"},
+            },
+            "required": ["ticket_id", "status_id"],
+        },
+    ),
+    Tool(
+        name="reassign_ticket",
+        description="Reassign a ticket to a different user.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "ticket_id": {"type": "integer"},
+                "assigned_id": {"type": "integer", "description": "New assigned user ID"},
+            },
+            "required": ["ticket_id", "assigned_id"],
+        },
+    ),
+    Tool(
+        name="glpi_get",
+        description="GET any GLPI endpoint. Path example: /Administration/User or /Assistance/Ticket?limit=10",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
             },
             "required": ["path"],
         },
     ),
     Tool(
         name="glpi_post",
-        description="Create a resource in GLPI via POST through the proxy.",
+        description="POST to any GLPI endpoint.",
         inputSchema={
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "GLPI resource path, e.g. /Assistance/Ticket"},
-                "body": {"type": "object", "description": "JSON body for the POST request"},
+                "path": {"type": "string"},
+                "body": {"type": "object"},
+            },
+            "required": ["path", "body"],
+        },
+    ),
+    Tool(
+        name="glpi_patch",
+        description="PATCH any GLPI endpoint.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "body": {"type": "object"},
             },
             "required": ["path", "body"],
         },
     ),
     Tool(
         name="glpi_delete",
-        description="Delete a resource in GLPI via DELETE through the proxy.",
+        description="DELETE any GLPI endpoint.",
         inputSchema={
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "Full resource path with ID, e.g. /Assistance/Ticket/42"},
+                "path": {"type": "string"},
+                "force": {"type": "boolean", "default": False},
             },
             "required": ["path"],
-        },
-    ),
-    Tool(
-        name="get_token",
-        description="Obtain a fresh Bearer token from GLPI via the proxy.",
-        inputSchema={"type": "object", "properties": {}},
-    ),
-    Tool(
-        name="list_endpoints",
-        description="List all available GLPI v2.2 endpoint categories.",
-        inputSchema={"type": "object", "properties": {}},
-    ),
-    Tool(
-        name="create_server_ticket",
-        description=(
-            "Create a GLPI ticket linked to a server (Computer asset). "
-            "Use this when starting a task on a server to register it in GLPI. "
-            "server_name must be one of: SRV-SCRAPING-PROXY, SRV-GLPI-PROCESSOR"
-        ),
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "server_name": {"type": "string", "description": "Server name, e.g. SRV-SCRAPING-PROXY"},
-                "title": {"type": "string", "description": "Short task title"},
-                "description": {"type": "string", "description": "Full task description"},
-                "agent": {"type": "string", "description": "Agent name creating the ticket", "default": "kiro"},
-                "urgency": {"type": "integer", "description": "1=very high, 2=high, 3=medium, 4=low, 5=very low", "default": 3},
-            },
-            "required": ["server_name", "title", "description"],
-        },
-    ),
-    Tool(
-        name="list_server_tickets",
-        description="List all active GLPI tickets linked to a server.",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "server_name": {"type": "string", "description": "Server name, e.g. SRV-GLPI-PROCESSOR"},
-            },
-            "required": ["server_name"],
-        },
-    ),
-    Tool(
-        name="complete_server_ticket",
-        description=(
-            "Mark a GLPI ticket as resolved. "
-            "Use this when a task on a server is finished."
-        ),
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "server_name": {"type": "string", "description": "Server name the ticket belongs to"},
-                "ticket_id": {"type": "integer", "description": "GLPI ticket ID to resolve"},
-                "solution": {"type": "string", "description": "Description of what was done", "default": "Tarea completada por agente."},
-            },
-            "required": ["server_name", "ticket_id"],
-        },
-    ),
-    Tool(
-        name="glpi_patch",
-        description="Update a resource in GLPI via PATCH through the proxy.",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "Full resource path with ID, e.g. /Assistance/Ticket/42"},
-                "body": {"type": "object", "description": "JSON body with fields to update"},
-            },
-            "required": ["path", "body"],
-        },
-    ),
-    Tool(
-        name="update_ticket",
-        description="Update ticket status and/or add a followup comment in one call.",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "ticket_id": {"type": "integer", "description": "GLPI ticket ID"},
-                "status_id": {"type": "integer", "description": "New status: 1=New 2=Processing 4=Pending 5=Solved 6=Closed"},
-                "followup": {"type": "string", "description": "Optional followup comment to add"},
-            },
-            "required": ["ticket_id"],
-        },
-    ),
-    Tool(
-        name="reassign_ticket",
-        description="Reassign a ticket to a different user (replaces current assigned member).",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "ticket_id": {"type": "integer", "description": "GLPI ticket ID"},
-                "assigned_id": {"type": "integer", "description": "User ID to assign the ticket to"},
-            },
-            "required": ["ticket_id", "assigned_id"],
         },
     ),
 ]
@@ -258,182 +195,138 @@ async def call_tool(name: str, arguments: dict) -> CallToolResult:
     def err(msg: str) -> CallToolResult:
         return CallToolResult(content=[TextContent(type="text", text=f"Error: {msg}")], isError=True)
 
-    if name == "proxy_health":
-        try:
+    try:
+        if name == "proxy_health":
             r = httpx.get(f"{PROXY_URL}/api/v2.2/Health", timeout=10)
             return ok(r.json())
-        except Exception as e:
-            return err(str(e))
 
-    if name == "get_token":
-        try:
-            token = _get_token()
-            return ok({"access_token": token[:40] + "...", "note": "Full token available for use in other tools"})
-        except Exception as e:
-            return err(str(e))
+        if name == "list_users":
+            r = httpx.get(f"{PROXY_URL}/api/v2.2/Administration/User?limit=100",
+                          headers=_headers(), timeout=15)
+            users = [{"id": u["id"], "username": u["username"]} for u in r.json()]
+            return ok(users)
 
-    if name == "glpi_get":
-        path = arguments.get("path", "")
-        try:
-            token = _get_token()
-            r = httpx.get(
-                f"{PROXY_URL}/api/v2.2{path}",
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=15,
-            )
-            return ok(r.json())
-        except Exception as e:
-            return err(str(e))
-
-    if name == "glpi_post":
-        path = arguments.get("path", "")
-        body = arguments.get("body", {})
-        try:
-            token = _get_token()
-            r = httpx.post(
-                f"{PROXY_URL}/api/v2.2{path}",
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                json=body,
-                timeout=15,
-            )
-            return ok(r.json())
-        except Exception as e:
-            return err(str(e))
-
-    if name == "glpi_delete":
-        path = arguments.get("path", "")
-        try:
-            token = _get_token()
-            r = httpx.delete(
-                f"{PROXY_URL}/api/v2.2{path}",
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=15,
-            )
-            return ok({"status": r.status_code, "body": r.text or "deleted"})
-        except Exception as e:
-            return err(str(e))
-
-    if name == "list_endpoints":
-        categories = [
-            "Administration: /User, /Group, /Entity, /Profile, /EventLog",
-            "Assistance:     /Ticket, /Problem, /Change, /RecurringTicket",
-            "Assets:         /Computer, /Monitor, /Printer, /Phone, /NetworkEquipment, /Software, /Rack, ...",
-            "Components:     /Processor, /Memory, /HardDrive, /NetworkCard, ...",
-            "Management:     /Budget, /Contract, /Supplier, /Document, /Domain, /Cluster, ...",
-            "Dropdowns:      /Location, /ITILCategory, /State, /Manufacturer, ...",
-            "Knowledgebase:  /Article, /Category",
-            "Project:        /Project, /Task",
-            "Tools:          /Reminder, /RSSFeed",
-            "Setup:          /Config, /LDAPDirectory",
-            "Rule:           /Collection/{collection}/Rule",
-            "GraphQL:        /GraphQL/",
-            "Status:         /status, /status/all",
-        ]
-        return ok("\n".join(categories))
-
-    if name == "glpi_patch":
-        path = arguments.get("path", "")
-        body = arguments.get("body", {})
-        try:
-            token = _get_token()
-            r = httpx.patch(
-                f"{PROXY_URL}/api/v2.2{path}",
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                json=body,
-                timeout=15,
-            )
-            try:
-                return ok(r.json())
-            except Exception:
-                return ok({"status": r.status_code, "body": r.text or "ok"})
-        except Exception as e:
-            return err(str(e))
-
-    if name == "create_server_ticket":
-        server_name = arguments.get("server_name", "")
-        try:
-            token = _get_token()
-            r = httpx.post(
-                f"{PROXY_URL}/api/v2.2/infra/servers/{server_name}/tickets",
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                json={
-                    "title": arguments["title"],
-                    "description": arguments["description"],
-                    "agent": arguments.get("agent", "kiro"),
-                    "urgency": arguments.get("urgency", 3),
-                },
-                timeout=15,
-            )
-            return ok(r.json())
-        except Exception as e:
-            return err(str(e))
-
-    if name == "list_server_tickets":
-        server_name = arguments.get("server_name", "")
-        try:
-            token = _get_token()
-            r = httpx.get(
-                f"{PROXY_URL}/api/v2.2/infra/servers/{server_name}/tickets",
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=15,
-            )
-            return ok(r.json())
-        except Exception as e:
-            return err(str(e))
-
-    if name == "complete_server_ticket":
-        server_name = arguments.get("server_name", "")
-        ticket_id = arguments.get("ticket_id")
-        try:
-            token = _get_token()
-            r = httpx.patch(
-                f"{PROXY_URL}/api/v2.2/infra/servers/{server_name}/tickets/{ticket_id}/complete",
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                json={"solution": arguments.get("solution", "Tarea completada por agente.")},
-                timeout=15,
-            )
-            try:
-                return ok(r.json())
-            except Exception:
-                return ok({"status": r.status_code, "body": r.text or "ok"})
-        except Exception as e:
-            return err(str(e))
-
-    if name == "update_ticket":
-        ticket_id = arguments.get("ticket_id")
-        try:
-            token = _get_token()
-            headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-            results = {}
+        if name == "list_tickets":
+            params = []
             if "status_id" in arguments:
-                r = httpx.patch(f"{PROXY_URL}/api/v2.2/Tickets/{ticket_id}/status",
-                                headers=headers, json={"status_id": arguments["status_id"]}, timeout=15)
-                results["status"] = r.json()
-            if arguments.get("followup"):
-                r = httpx.post(f"{PROXY_URL}/api/v2.2/Tickets/{ticket_id}/followup",
-                               headers=headers, json={"content": arguments["followup"], "is_private": False}, timeout=15)
-                results["followup"] = r.json()
-            return ok(results)
-        except Exception as e:
-            return err(str(e))
-
-    if name == "reassign_ticket":
-        ticket_id = arguments.get("ticket_id")
-        assigned_id = arguments.get("assigned_id")
-        try:
-            token = _get_token()
-            headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-            # Remove current assigned member
-            httpx.delete(f"{PROXY_URL}/api/v2.2/Assistance/Ticket/{ticket_id}/TeamMember",
-                         headers=headers, json={"type": "User", "role": "assigned"}, timeout=15)
-            # Add new assigned member
-            r = httpx.post(f"{PROXY_URL}/api/v2.2/Assistance/Ticket/{ticket_id}/TeamMember",
-                           headers=headers, json={"type": "User", "id": assigned_id, "role": "assigned"}, timeout=15)
+                params.append(f"status_id={arguments['status_id']}")
+            if "assigned_id" in arguments:
+                params.append(f"assigned_id={arguments['assigned_id']}")
+            if "requester_id" in arguments:
+                params.append(f"requester_id={arguments['requester_id']}")
+            params.append(f"limit={arguments.get('limit', 50)}")
+            params.append(f"start={arguments.get('start', 0)}")
+            qs = "&".join(params)
+            r = httpx.get(f"{PROXY_URL}/api/v2.2/Tickets?{qs}", headers=_headers(), timeout=15)
             return ok(r.json())
-        except Exception as e:
-            return err(str(e))
 
-    return err(f"Unknown tool: {name}")
+        if name == "get_ticket":
+            ticket_id = arguments["ticket_id"]
+            h = _headers()
+            r = httpx.get(f"{PROXY_URL}/api/v2.2/Assistance/Ticket/{ticket_id}", headers=h, timeout=15)
+            result = r.json()
+            if arguments.get("include_followups"):
+                rf = httpx.get(f"{PROXY_URL}/api/v2.2/Assistance/Ticket/{ticket_id}/Timeline/Followup",
+                               headers=h, timeout=15)
+                result["followups"] = rf.json()
+            return ok(result)
+
+        if name == "create_ticket":
+            r = httpx.post(f"{PROXY_URL}/api/v2.2/Tickets", headers=_headers(), json={
+                "title": arguments["title"],
+                "content": arguments["content"],
+                "requester_id": arguments["requester_id"],
+                "assigned_id": arguments["assigned_id"],
+                "type": arguments.get("type", 1),
+                "urgency": arguments.get("urgency", 3),
+                "impact": arguments.get("urgency", 3),
+                "priority": arguments.get("urgency", 3),
+            }, timeout=15)
+            return ok(r.json())
+
+        if name == "add_followup":
+            r = httpx.post(
+                f"{PROXY_URL}/api/v2.2/Tickets/{arguments['ticket_id']}/followup",
+                headers=_headers(),
+                json={"content": arguments["content"], "is_private": arguments.get("is_private", False)},
+                timeout=15,
+            )
+            return ok(r.json())
+
+        if name == "update_ticket_status":
+            r = httpx.patch(
+                f"{PROXY_URL}/api/v2.2/Tickets/{arguments['ticket_id']}/status",
+                headers=_headers(),
+                json={"status_id": arguments["status_id"]},
+                timeout=15,
+            )
+            return ok(r.json())
+
+        if name == "reassign_ticket":
+            ticket_id = arguments["ticket_id"]
+            assigned_id = arguments["assigned_id"]
+            h = _headers()
+            httpx.delete(f"{PROXY_URL}/api/v2.2/Assistance/Ticket/{ticket_id}/TeamMember",
+                         headers=h, json={"type": "User", "role": "assigned"}, timeout=15)
+            r = httpx.post(f"{PROXY_URL}/api/v2.2/Assistance/Ticket/{ticket_id}/TeamMember",
+                           headers=h, json={"type": "User", "id": assigned_id, "role": "assigned"}, timeout=15)
+            return ok(r.json())
+
+        if name == "glpi_get":
+            r = httpx.get(f"{PROXY_URL}/api/v2.2{arguments['path']}", headers=_headers(), timeout=15)
+            return ok(r.json())
+
+        if name == "glpi_post":
+            r = httpx.post(f"{PROXY_URL}/api/v2.2{arguments['path']}", headers=_headers(),
+                           json=arguments["body"], timeout=15)
+            return ok(r.json())
+
+        if name == "glpi_patch":
+            r = httpx.patch(f"{PROXY_URL}/api/v2.2{arguments['path']}", headers=_headers(),
+                            json=arguments["body"], timeout=15)
+            return ok(r.json())
+
+        if name == "glpi_delete":
+            path = arguments["path"]
+            if arguments.get("force"):
+                path += "?force=true"
+            r = httpx.delete(f"{PROXY_URL}/api/v2.2{path}", headers=_headers(), timeout=15)
+            return ok({"status": r.status_code, "body": r.text or "deleted"})
+
+        return err(f"Unknown tool: {name}")
+
+    except Exception as e:
+        return err(str(e))
+
+
+# ── Resources (docs) ──────────────────────────────────────────────────────────
+RESOURCES = [
+    Resource(uri="glpi://docs/endpoints", name="Proxy Endpoint Reference",
+             description="All proxy endpoints and how to use them", mimeType="text/markdown"),
+    Resource(uri="glpi://docs/rules", name="Agent Rules",
+             description="Rules for agents using this proxy", mimeType="text/markdown"),
+]
+
+
+@server.list_resources()
+async def list_resources() -> ListResourcesResult:
+    return ListResourcesResult(resources=RESOURCES)
+
+
+@server.read_resource()
+async def read_resource(uri: str) -> ReadResourceResult:
+    import subprocess
+    mapping = {
+        "glpi://docs/endpoints": ("main", "PROXY_ENDPOINTS.md"),
+        "glpi://docs/rules":     ("main", "AGENT_RULES.md"),
+    }
+    if uri not in mapping:
+        return ReadResourceResult(contents=[TextContent(type="text", text=f"Unknown: {uri}")])
+    branch, path = mapping[uri]
+    result = subprocess.run(["git", "show", f"{branch}:{path}"],
+                            cwd="/home/julian/programming/GLPI-API",
+                            capture_output=True, text=True)
+    return ReadResourceResult(contents=[TextContent(type="text", text=result.stdout)])
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
