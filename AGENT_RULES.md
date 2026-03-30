@@ -21,6 +21,20 @@ Roles are always determined by the use case:
 http://192.168.1.38:8080/api/v2.2
 ```
 
+> **CRITICAL**: All requests — including token acquisition — go through the proxy.  
+> Never call `http://192.168.1.33` directly. That is the internal GLPI server and is not accessible to agents.  
+> The only valid entry point is `http://192.168.1.38:8080`.
+
+### Connectivity check (no auth required)
+
+Before any operation, verify the proxy is up:
+```
+GET http://192.168.1.38:8080/api/v2.2/ping
+```
+Expected response: `{"service": "glpi-api-proxy", "status": "ok", "version": "1.0.0"}`
+
+If this times out or fails → proxy is down, do not attempt any further calls.
+
 ---
 
 ## Step 1 — Authenticate
@@ -216,3 +230,33 @@ Status IDs: `1`=New `2`=Processing `4`=Pending `5`=Solved `6`=Closed
 | `impact` | int | same scale as urgency |
 | `priority` | int | same scale as urgency |
 | `status` | int | `1`=New `2`=Processing `4`=Pending `5`=Solved `6`=Closed |
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `ping` times out | Proxy is down | Do not proceed. Report the issue. |
+| `ping` OK but `/token` times out | Agent is calling GLPI directly | Use `http://192.168.1.38:8080` for ALL calls |
+| `401` on any endpoint | Token missing or expired | Re-authenticate via `POST /token` with `scope: "api user"` |
+| `403 ERROR_RIGHT_MISSING` | Token was issued without `api user` scope | Re-authenticate and explicitly include `"scope": "api user"` in the token request body |
+| Empty ticket list | Wrong `assigned_id` or `status_id` | Use `GET /Tickets` without filters first to confirm tickets exist |
+
+### Correct token request (copy-paste ready)
+
+```
+POST http://192.168.1.38:8080/api/v2.2/token
+Content-Type: application/json
+
+{
+  "grant_type": "password",
+  "client_id": "<client_id>",
+  "client_secret": "<client_secret>",
+  "username": "<username>",
+  "password": "<password>",
+  "scope": "api user"
+}
+```
+
+The `scope` field is **mandatory**. Omitting it causes all GLPI API calls to return `403`.
